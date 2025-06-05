@@ -21,6 +21,29 @@
 
 (vl-load-com) ; Necessário para funções VLA (Visual LISP ActiveX)
 
+;;; --- Funções Auxiliares Reutilizáveis ---
+(defun IAN:safe-open (path mode / h)
+  (cond
+    ((setq h (open path mode)) h)
+    (t (princ (strcat "\n[ERRO] Falha ao abrir: " path)) nil)))
+
+(defun IAN:close-handle (h)
+  (if h (progn (close h) nil) nil))
+
+(defun IAN:std-error (msg restore-fn)
+  (when restore-fn (restore-fn))
+  (unless (member msg '("Function cancelled" "quit / exit abort" "console break"))
+    (princ (strcat "\nErro: " msg)))
+  (princ))
+
+(defun IAN:disable-osnap (/ prev)
+  (setq prev (getvar "OSMODE"))
+  (setvar "OSMODE" 0)
+  prev)
+
+(defun IAN:restore-osnap (prev)
+  (when prev (setvar "OSMODE" prev)))
+
 ;;;; ----------------------------------------------------------------------;;;;
 ;;;                                                                        ;;;
 ;;;                     COMANDOS                                           ;;;
@@ -165,26 +188,28 @@
 (defun c:GERAR_PONTOS_REGUA (/ *error* ss_linhas_alvo contador ent_nome ent_obj
                                comprimento_regua arquivo_saida lista_todos_os_pontos f
                                ponto_A ponto_B lista_pontos_entidade_atual primeiro_ponto_adicionado
-                               tolerancia start_pt_entidade_catch) 
+                               tolerancia start_pt_entidade_catch old_osmode)
   (defun *error* (msg)
-    (if f (progn (close f) (setq f nil)))
-    (if (not (member msg '("Function cancelled" "quit / exit abort" "console break")))
-      (princ (strcat "\nErro (GERAR_PONTOS_REGUA): " msg)))
-    (princ)
+    (IAN:std-error msg
+                   (function
+                     (lambda ()
+                       (setq f (IAN:close-handle f))
+                       (IAN:restore-osnap old_osmode))))
   )
+  (setq old_osmode (IAN:disable-osnap))
   (setq tolerancia 0.0001) (setq comprimento_regua nil)
   (princ "\n>>> GERADOR DE PONTOS COM RÉGUA (GPR) <<<")
   (princ "\nSelecione as entidades alvo (linhas, polilinhas, arcos, splines): ")
   (setq ss_linhas_alvo (ssget '((0 . "LINE,LWPOLYLINE,ARC,SPLINE"))))
 
-  (if (null ss_linhas_alvo) (progn (princ "\nNenhuma entidade selecionada. Comando cancelado.") (exit)))
+  (if (null ss_linhas_alvo) (progn (princ "\nNenhuma entidade selecionada. Comando cancelado.") (IAN:restore-osnap old_osmode) (exit)))
 
   (while (or (null comprimento_regua) (<= comprimento_regua 0.0))
     (setq comprimento_regua (getdist "\nDigite o comprimento da régua/segmento: "))
     (if (or (null comprimento_regua) (<= comprimento_regua 0.0)) (princ "\nComprimento inválido. Deve ser positivo."))
   )
   (setq arquivo_saida (getfiled "Salvar arquivo de coordenadas TXT" "" "txt" 1))
-  (if (null arquivo_saida) (progn (princ "\nNenhum arquivo selecionado. Comando cancelado.") (exit)))
+  (if (null arquivo_saida) (progn (princ "\nNenhum arquivo selecionado. Comando cancelado.") (IAN:restore-osnap old_osmode) (exit)))
 
   (setq lista_todos_os_pontos nil) (setq contador 0)
   (princ (strcat "\nProcessando " (itoa (sslength ss_linhas_alvo)) " entidade(s)..."))
@@ -228,14 +253,14 @@
   )
   (if lista_todos_os_pontos
     (progn
-      (setq f (open arquivo_saida "w"))
+      (setq f (IAN:safe-open arquivo_saida "w"))
       (if f
         (progn
           (princ (strcat "\n\nEscrevendo " (itoa (length lista_todos_os_pontos)) " pontos em: " arquivo_saida))
           (foreach pt lista_todos_os_pontos
             (write-line (strcat (rtos (car pt) 2 8) "," (rtos (cadr pt) 2 8) "," (rtos (caddr pt) 2 8)) f)
           )
-          (close f) (setq f nil)
+          (setq f (IAN:close-handle f))
           (princ "\nSucesso! Arquivo salvo.")
         )
         (princ (strcat "\n[GPR ERRO] Falha ao abrir arquivo para escrita: " arquivo_saida))
@@ -243,6 +268,7 @@
     )
     (princ "\n\nNenhum ponto gerado para salvar.")
   )
+  (IAN:restore-osnap old_osmode)
   (princ)
 )
 (defun c:GPR () (c:GERAR_PONTOS_REGUA)) 
@@ -343,19 +369,21 @@
 (defun c:COLOCAR_BLOCO_EM_PONTOS_MEDIOS ( / *error* arquivo_txt f linha lineno
                                         lista_pontos_lidos p_temp i
                                         p_orig_A p_orig_B p_medio_calc
-                                        lista_segmentos_para_blocos 
+                                        lista_segmentos_para_blocos
                                         ent_sel_data nome_bloco_real vla_bloco_selecionado_raw vla_bloco_modelo
                                         layer_alvo_nome vla_layer_alvo angulo_insercao old_clayer
                                         contador_blocos_inseridos mspace doc tolerancia_dist
-                                        selecao_valida vla_bloco_inserido_raw)
+                                        selecao_valida vla_bloco_inserido_raw old_osmode)
   (defun *error* (msg)
-    (if f (progn (close f) (setq f nil)))
-    (if old_clayer (setvar "CLAYER" old_clayer))
-    (if (not (member msg '("Function cancelled" "quit / exit abort" "console break")))
-      (princ (strcat "\nErro (COLOCAR_BLOCO_EM_PONTOS_MEDIOS): " msg)))
-    (princ)
+    (IAN:std-error msg
+                   (function
+                     (lambda ()
+                       (setq f (IAN:close-handle f))
+                       (if old_clayer (setvar "CLAYER" old_clayer))
+                       (IAN:restore-osnap old_osmode))))
   )
-  (setq layer_alvo_nome "BLOCOS_PONTOS_MEDIOS") 
+  (setq old_osmode (IAN:disable-osnap))
+  (setq layer_alvo_nome "BLOCOS_PONTOS_MEDIOS")
   (setq contador_blocos_inseridos 0)
   (setq lista_pontos_lidos nil)
   (setq lista_segmentos_para_blocos nil)
@@ -368,10 +396,10 @@
 
   (setq arquivo_txt (getfiled "Selecione o arquivo TXT com coordenadas (X,Y,Z)" "" "txt" 0))
   (if (or (null arquivo_txt) (not (findfile arquivo_txt)))
-    (progn (princ "\nArquivo não selecionado/encontrado. Comando cancelado.") (exit))
+    (progn (princ "\nArquivo não selecionado/encontrado. Comando cancelado.") (IAN:restore-osnap old_osmode) (exit))
   )
-  (setq f (open arquivo_txt "r"))
-  (if (not f) (progn (princ (strcat "\n[CBPM ERRO] Falha ao abrir arquivo: " arquivo_txt)) (exit)))
+  (setq f (IAN:safe-open arquivo_txt "r"))
+  (if (not f) (progn (princ (strcat "\n[CBPM ERRO] Falha ao abrir arquivo: " arquivo_txt)) (IAN:restore-osnap old_osmode) (exit)))
   
   (princ (strcat "\nLendo arquivo: " arquivo_txt))
   (setq lineno 0)
@@ -383,11 +411,11 @@
       (princ (strcat "\n  [CBPM AVISO] Linha " (itoa lineno) " ignorada: \"" linha "\""))
     )
   )
-  (close f) (setq f nil)
+  (setq f (IAN:close-handle f))
   (setq lista_pontos_lidos (reverse lista_pontos_lidos)) 
 
   (if (< (length lista_pontos_lidos) 2)
-    (progn (princ "\n[CBPM ERRO] Menos de 2 pontos válidos lidos. Comando cancelado.") (exit))
+    (progn (princ "\n[CBPM ERRO] Menos de 2 pontos válidos lidos. Comando cancelado.") (IAN:restore-osnap old_osmode) (exit))
   )
   (princ (strcat "\n" (itoa (length lista_pontos_lidos)) " pontos válidos lidos."))
 
@@ -409,7 +437,7 @@
   (setq lista_segmentos_para_blocos (reverse lista_segmentos_para_blocos))
 
   (if (null lista_segmentos_para_blocos)
-    (progn (princ "\n[CBPM ERRO] Nenhum segmento válido para pontos médios. Verifique o arquivo.") (exit))
+    (progn (princ "\n[CBPM ERRO] Nenhum segmento válido para pontos médios. Verifique o arquivo.") (IAN:restore-osnap old_osmode) (exit))
   )
   (princ (strcat "\n" (itoa (length lista_segmentos_para_blocos)) " pontos médios calculados."))
 
@@ -435,7 +463,7 @@
           (princ (strcat "\n[CBPM ERRO] Conversão para objeto VLA: " (vl-catch-all-error-message vla_bloco_selecionado_raw)))
         )
       )
-      (progn (princ "\nSeleção cancelada. Comando encerrado.") (exit))
+      (progn (princ "\nSeleção cancelada. Comando encerrado.") (IAN:restore-osnap old_osmode) (exit))
     )
   )
   (setq vla_layer_alvo (IAN:cbpm-ensure-layer layer_alvo_nome 7)) 
@@ -472,7 +500,8 @@
     (princ (strcat "\nSucesso! " (itoa contador_blocos_inseridos) " bloco(s) '" nome_bloco_real "' inserido(s)."))
     (princ "\nNenhum bloco foi inserido.")
   )
-  (princ) 
+  (IAN:restore-osnap old_osmode)
+  (princ)
 )
 (defun c:CBPM () (c:COLOCAR_BLOCO_EM_PONTOS_MEDIOS)) 
 
@@ -489,8 +518,8 @@
 ;;;
 ;;; c:CRIAR_CAMADAS_BLOCO_ESCADINHA (CBE)
 ;;;
-(defun c:CRIAR_CAMADAS_BLOCO_ESCADINHA ( / 
-                                       *error* old_cmdecho old_clayer
+(defun c:CRIAR_CAMADAS_BLOCO_ESCADINHA ( /
+                                       *error* old_cmdecho old_clayer old_osmode
                                        ss_blocos_base selection_count i ent_name vla_bloco_base
                                        bloco_base_process_list ; Lista de (list VLA_Bloco_Base PontoInsercaoBase RotacaoBase NomeBlocoBase)
                                        direcao_escada_str direcao_sinal_z
@@ -506,17 +535,19 @@
 
   ;; --- Manipulador de Erro Local ---
   (defun *error* (msg)
-    (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-    (if old_clayer (setvar "CLAYER" old_clayer))
-    (if (not (member msg '("Function cancelled" "quit / exit abort" "console break")))
-      (princ (strcat "\nErro (CRIAR_CAMADAS_BLOCO_ESCADINHA): " msg)))
-    (princ)
+    (IAN:std-error msg
+                   (function
+                     (lambda ()
+                       (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+                       (if old_clayer (setvar "CLAYER" old_clayer))
+                       (IAN:restore-osnap old_osmode))))
   )
 
   ;; --- Inicialização ---
   (setq old_cmdecho (getvar "CMDECHO"))
   (setvar "CMDECHO" 0)
   (setq old_clayer (getvar "CLAYER"))
+  (setq old_osmode (IAN:disable-osnap))
   (setq total_blocos_criados 0)
   (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))
   (setq mspace (vla-get-ModelSpace doc))
@@ -527,7 +558,7 @@
   (princ "\nSelecione os blocos da camada base:")
   (setq ss_blocos_base (ssget '((0 . "INSERT")))) ; Filtra para selecionar apenas blocos
   (if (null ss_blocos_base)
-    (progn (princ "\nNenhum bloco selecionado. Comando cancelado.") (setvar "CMDECHO" old_cmdecho) (exit))
+    (progn (princ "\nNenhum bloco selecionado. Comando cancelado.") (setvar "CMDECHO" old_cmdecho) (IAN:restore-osnap old_osmode) (exit))
   )
   (setq selection_count (sslength ss_blocos_base))
   (princ (strcat "\n" (itoa selection_count) " bloco(s) base selecionado(s)."))
@@ -535,18 +566,18 @@
   ;; --- Etapa 2: Inputs do Usuário ---
   (initget "Subir Descer")
   (setq direcao_escada_str (getkword "\nA escadinha será para [Subir/Descer] em relação à camada base?: "))
-  (if (null direcao_escada_str) (progn (princ "\nOpção inválida. Comando Cancelado.") (setvar "CMDECHO" old_cmdecho) (exit)))
+  (if (null direcao_escada_str) (progn (princ "\nOpção inválida. Comando Cancelado.") (setvar "CMDECHO" old_cmdecho) (IAN:restore-osnap old_osmode) (exit)))
   (setq direcao_sinal_z (if (eq direcao_escada_str "Subir") 1.0 -1.0))
 
   (setq offset_h (getdist "\nDigite o offset horizontal por camada (recuo/avanço): "))
-  (if (null offset_h) (progn (princ "\nOffset horizontal não fornecido. Comando Cancelado.") (setvar "CMDECHO" old_cmdecho) (exit)))
+  (if (null offset_h) (progn (princ "\nOffset horizontal não fornecido. Comando Cancelado.") (setvar "CMDECHO" old_cmdecho) (IAN:restore-osnap old_osmode) (exit)))
 
   (setq alt_v (getdist "\nDigite a altura vertical por camada (altura do bloco/degrau): "))
-  (if (or (null alt_v) (<= alt_v 0.0)) 
-    (progn (princ "\nAltura vertical inválida ou zero. Comando Cancelado.") (setvar "CMDECHO" old_cmdecho) (exit)))
+  (if (or (null alt_v) (<= alt_v 0.0))
+    (progn (princ "\nAltura vertical inválida ou zero. Comando Cancelado.") (setvar "CMDECHO" old_cmdecho) (IAN:restore-osnap old_osmode) (exit)))
 
   (setq z_final (getreal "\nDigite a coordenada Z final desejada para a última camada: "))
-  (if (null z_final) (progn (princ "\nZ final não fornecido. Comando Cancelado.") (setvar "CMDECHO" old_cmdecho) (exit)))
+  (if (null z_final) (progn (princ "\nZ final não fornecido. Comando Cancelado.") (setvar "CMDECHO" old_cmdecho) (IAN:restore-osnap old_osmode) (exit)))
 
   ;; --- Etapa 3: Coletar Informações dos Blocos Base ---
   (setq bloco_base_process_list nil)
@@ -580,7 +611,7 @@
   (setq bloco_base_process_list (reverse bloco_base_process_list))
 
   (if (null bloco_base_process_list)
-    (progn (princ "\nNenhum bloco válido encontrado na seleção. Comando cancelado.") (setvar "CMDECHO" old_cmdecho) (exit)))
+    (progn (princ "\nNenhum bloco válido encontrado na seleção. Comando cancelado.") (setvar "CMDECHO" old_cmdecho) (IAN:restore-osnap old_osmode) (exit)))
 
   ;; --- Etapa 4: Processar cada Bloco Base e Criar Camadas ---
   (princ "\nCriando camadas em escadinha...")
@@ -667,6 +698,7 @@
   ;; --- Finalização ---
   (setvar "CMDECHO" old_cmdecho)
   (setvar "CLAYER" old_clayer) ; Restaura layer original que estava ativa
+  (IAN:restore-osnap old_osmode)
   (princ)
 )
 (defun c:CBE () (c:CRIAR_CAMADAS_BLOCO_ESCADINHA)) ; Alias curto
@@ -826,9 +858,9 @@
 ;;; c:ALTBLOCOSEQ (Alterar Altura de Blocos em Sequência)
 ;;; Comando principal.
 ;;;
-(defun c:ALTBLOCOSEQ ( / 
+(defun c:ALTBLOCOSEQ ( /
                        *error*                           ; Manipulador de erro local
-                       old_cmdecho                       ; Para restaurar CMDECHO
+                       old_cmdecho old_osmode            ; Para restaurar CMDECHO e OSMODE
                        first_block_ename first_block_vla first_block_name ; Bloco inicial
                        height_offset                     ; Altura de deslocamento Z
                        all_instances_of_block            ; Lista de todos os blocos com o mesmo nome
@@ -842,15 +874,17 @@
 
   ;; --- Manipulador de Erro Local ---
   (defun *error* (msg)
-    (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-    (if (not (member msg '("Function cancelled" "quit / exit abort" "console break")))
-      (princ (strcat "\nErro (ALTBLOCOSEQ): " msg)))
-    (princ)
+    (IAN:std-error msg
+                   (function
+                     (lambda ()
+                       (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+                       (IAN:restore-osnap old_osmode))))
   )
 
   ;; --- Inicialização ---
   (setq old_cmdecho (getvar "CMDECHO"))
   (setvar "CMDECHO" 0) ; Suprime eco de comandos
+  (setq old_osmode (IAN:disable-osnap))
   (setq modified_block_count 0)
 
   (princ "\n>>> ALTERAR ALTURA DE BLOCOS EM SEQUÊNCIA (ALTBLOCOSEQ) <<<")
@@ -863,6 +897,7 @@
       ((null first_block_ename) ; Usuário pressionou ESC
        (princ "\nSeleção cancelada. Comando encerrado.")
        (setvar "CMDECHO" old_cmdecho)
+       (IAN:restore-osnap old_osmode)
        (exit)
       )
       ((setq vla_operation_error_obj (vl-catch-all-apply 'vlax-ename->vla-object (list first_block_ename)))
@@ -891,6 +926,7 @@
     (progn 
       (princ "\nAltura de deslocamento inválida ou zero. Comando cancelado.")
       (setvar "CMDECHO" old_cmdecho)
+      (IAN:restore-osnap old_osmode)
       (exit)
     )
   )
@@ -901,6 +937,7 @@
     (progn 
       (princ (strcat "\nNenhuma instância adicional do bloco '" first_block_name "' encontrada (ou apenas a selecionada)."))
       (setvar "CMDECHO" old_cmdecho)
+      (IAN:restore-osnap old_osmode)
       (exit)
     )
   )
@@ -914,6 +951,7 @@
     (progn 
       (princ "\nNão foi possível ordenar uma sequência de pelo menos 2 blocos. Verifique os blocos.")
       (setvar "CMDECHO" old_cmdecho)
+      (IAN:restore-osnap old_osmode)
       (exit)
     )
   )
@@ -961,6 +999,7 @@
 
   ;; --- Finalização ---
   (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
   (princ)
 )
 (defun c:ABS () (c:ALTBLOCOSEQ))
@@ -982,9 +1021,9 @@
 ;;;
 ;;; c:APAGAR_BLOCOS_INTERCALADOS_INVERSO (DELBLOCINV)
 ;;;
-(defun c:APAGAR_BLOCOS_INTERCALADOS_INVERSO ( / 
+(defun c:APAGAR_BLOCOS_INTERCALADOS_INVERSO ( /
                                *error*                           ; Manipulador de erro local
-                               old_cmdecho                       ; Para restaurar CMDECHO
+                               old_cmdecho old_osmode            ; Para restaurar CMDECHO e OSMODE
                                first_block_ename first_block_vla first_block_name ; Bloco inicial
                                all_instances_of_block            ; Lista de todos os blocos com o mesmo nome
                                ordered_block_sequence            ; Blocos ordenados por proximidade
@@ -995,15 +1034,17 @@
 
   ;; --- Manipulador de Erro Local ---
   (defun *error* (msg)
-    (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-    (if (not (member msg '("Function cancelled" "quit / exit abort" "console break")))
-      (princ (strcat "\nErro (APAGAR_BLOCOS_INTERCALADOS_INVERSO): " msg)))
-    (princ)
+    (IAN:std-error msg
+                   (function
+                     (lambda ()
+                       (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+                       (IAN:restore-osnap old_osmode))))
   )
 
   ;; --- Inicialização ---
   (setq old_cmdecho (getvar "CMDECHO"))
   (setvar "CMDECHO" 0) ; Suprime eco de comandos
+  (setq old_osmode (IAN:disable-osnap))
   (setq deleted_block_count 0)
 
   (princ "\n>>> APAGAR BLOCOS INTERCALADOS EM SEQUÊNCIA (ORDEM INVERSA) <<<")
@@ -1013,9 +1054,10 @@
   (while (not first_block_vla)
     (setq first_block_ename (car (entsel "\nSelecione o PRIMEIRO bloco da sequência para iniciar a remoção: ")))
     (cond
-      ((null first_block_ename) 
+      ((null first_block_ename)
        (princ "\nSeleção cancelada. Comando encerrado.")
        (setvar "CMDECHO" old_cmdecho)
+       (IAN:restore-osnap old_osmode)
        (exit)
       )
       ((setq vla_operation_error_obj (vl-catch-all-apply 'vlax-ename->vla-object (list first_block_ename)))
@@ -1045,6 +1087,7 @@
     (progn 
       (princ (strcat "\nNenhuma instância adicional do bloco '" first_block_name "' encontrada (ou apenas a selecionada)."))
       (setvar "CMDECHO" old_cmdecho)
+      (IAN:restore-osnap old_osmode)
       (exit)
     )
   )
@@ -1059,6 +1102,7 @@
     (progn 
       (princ "\nNão foi possível ordenar a sequência de blocos. Verifique os blocos.")
       (setvar "CMDECHO" old_cmdecho)
+      (IAN:restore-osnap old_osmode)
       (exit)
     )
   )
@@ -1089,6 +1133,7 @@
 
   ;; --- Finalização ---
   (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
   (princ)
 )
 
@@ -1109,8 +1154,8 @@
 ;;;
 ;;; c:EXPORTAR_DADOS_BLOCOS (EXDBLK)
 ;;;
-(defun c:EXPORTAR_DADOS_BLOCOS ( / 
-                                *error* old_cmdecho
+(defun c:EXPORTAR_DADOS_BLOCOS ( /
+                                *error* old_cmdecho old_osmode
                                 ss_blocks selection_count i ent_name vla_block
                                 pt_variant pt_safearray pt_list
                                 x y z rotation_rad
@@ -1120,16 +1165,18 @@
 
   ;; --- Manipulador de Erro Local ---
   (defun *error* (msg)
-    (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-    (if f (close f)) ; Garante que o arquivo seja fechado em caso de erro
-    (if (not (member msg '("Function cancelled" "quit / exit abort" "console break")))
-      (princ (strcat "\nErro (EXPORTAR_DADOS_BLOCOS): " msg)))
-    (princ)
+    (IAN:std-error msg
+                   (function
+                     (lambda ()
+                       (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+                       (setq f (IAN:close-handle f))
+                       (IAN:restore-osnap old_osmode))))
   )
 
   ;; --- Inicialização ---
   (setq old_cmdecho (getvar "CMDECHO"))
   (setvar "CMDECHO" 0) ; Suprime eco de comandos
+  (setq old_osmode (IAN:disable-osnap))
   (setq export_count 0)
 
   (princ "\n>>> EXPORTAR DADOS DE BLOCOS (X,Y,Z,Ângulo) (EXDBLK) <<<")
@@ -1139,7 +1186,7 @@
   (setq ss_blocks (ssget '((0 . "INSERT")))) ; Filtra para selecionar apenas blocos
   
   (if (null ss_blocks)
-    (progn (princ "\nNenhum bloco selecionado. Comando cancelado.") (setvar "CMDECHO" old_cmdecho) (exit))
+    (progn (princ "\nNenhum bloco selecionado. Comando cancelado.") (setvar "CMDECHO" old_cmdecho) (IAN:restore-osnap old_osmode) (exit))
   )
   (setq selection_count (sslength ss_blocks))
   (princ (strcat "\n" (itoa selection_count) " bloco(s) selecionado(s) para exportação."))
@@ -1147,15 +1194,16 @@
   ;; --- Etapa 2: Obter Arquivo de Saída ---
   (setq file_path (getfiled "Salvar arquivo de dados dos blocos TXT" "" "txt" 1)) ; 1 = Salvar (pode sobrescrever)
   (if (null file_path)
-    (progn (princ "\nNenhum arquivo selecionado para salvar. Comando cancelado.") (setvar "CMDECHO" old_cmdecho) (exit))
+    (progn (princ "\nNenhum arquivo selecionado para salvar. Comando cancelado.") (setvar "CMDECHO" old_cmdecho) (IAN:restore-osnap old_osmode) (exit))
   )
 
   ;; --- Etapa 3: Processar Blocos e Escrever no Arquivo ---
-  (setq f (open file_path "w")) ; Abre para escrita ("w" sobrescreve se existir)
+  (setq f (IAN:safe-open file_path "w"))
   (if (not f)
-    (progn 
+    (progn
       (princ (strcat "\n[EXDBLK ERRO] Não foi possível criar/abrir o arquivo: " file_path))
       (setvar "CMDECHO" old_cmdecho)
+      (IAN:restore-osnap old_osmode)
       (exit)
     )
   )
@@ -1200,7 +1248,7 @@
     )
     (setq i (1+ i))
   )
-  (close f)
+  (setq f (IAN:close-handle f))
 
   ;; --- Feedback Final ---
   (if (> export_count 0)
@@ -1210,6 +1258,7 @@
 
   ;; --- Finalização ---
   (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
   (princ)
 )
 (defun c:EXDBLK () (c:EXPORTAR_DADOS_BLOCOS)) ; Alias curto
