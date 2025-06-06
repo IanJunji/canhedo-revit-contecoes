@@ -940,6 +940,32 @@
 )
 
 ;;;
+;;; IAN:abs-build-point-map
+;;; Constrói um mapa associativo com o handle de cada bloco e seu ponto de
+;;; inserção. O cache evita múltiplas leituras via VLA, melhorando o desempenho
+;;; em desenhos grandes.
+;;;
+;;; Argumentos:
+;;;   block_list (List) : Lista de objetos VLA de blocos.
+;;;
+;;; Retorna:
+;;;   (List) : Assoc list no formato (handle . (x y z)).
+;;;
+(defun IAN:abs-build-point-map (block_list / blk h pt acc)
+  (setq acc nil)
+  (foreach blk block_list
+    (setq h (if (vlax-property-available-p blk 'Handle)
+              (vla-get-Handle blk)
+              nil))
+    (setq pt (IAN:abs-get-insertion-point-list blk))
+    (if (and h pt)
+      (setq acc (cons (cons h pt) acc))
+    )
+  )
+  (reverse acc)
+)
+
+;;;
 ;;; IAN:abs-sort-blocks-by-proximity
 ;;; Ordena uma lista de VLA-Objects de blocos pela proximidade,
 ;;; começando com um bloco inicial especificado.
@@ -947,11 +973,12 @@
 ;;; Argumentos:
 ;;;   first_block_vla      (VLA-Object) : O bloco inicial da sequência.
 ;;;   candidate_blocks_vla (List)       : Lista de VLA-Objects candidatos (deve incluir first_block_vla).
+;;;   block_point_map      (List)       : Assoc list de pontos de inserção (handle . pt).
 ;;;
 ;;; Retorna:
 ;;;   (List) : Lista ordenada de VLA-Objects.
 ;;;
-(defun IAN:abs-sort-blocks-by-proximity (first_block_vla candidate_blocks_vla /
+(defun IAN:abs-sort-blocks-by-proximity (first_block_vla candidate_blocks_vla block_point_map /
                                          ordered_list current_block_obj remaining_candidates_copy
                                          current_block_pt closest_next_block shortest_dist_found
                                          candidate_obj_loop candidate_pt_loop current_iter_dist)
@@ -986,13 +1013,13 @@
       ;; Se ainda houver candidatos, procura o próximo mais próximo
       (if remaining_candidates_copy
         (progn
-          (setq current_block_pt (IAN:abs-get-insertion-point-list current_block_obj))
+          (setq current_block_pt (cdr (assoc (vla-get-Handle current_block_obj) block_point_map)))
           (setq closest_next_block nil)
           (setq shortest_dist_found nil)
 
           (if current_block_pt ; Só procura se o ponto do bloco atual foi obtido
             (foreach candidate_obj_loop remaining_candidates_copy
-              (setq candidate_pt_loop (IAN:abs-get-insertion-point-list candidate_obj_loop))
+              (setq candidate_pt_loop (cdr (assoc (vla-get-Handle candidate_obj_loop) block_point_map)))
               (if candidate_pt_loop ; Só considera o candidato se seu ponto foi obtido
                 (progn
                   (setq current_iter_dist (distance current_block_pt candidate_pt_loop))
@@ -1006,13 +1033,14 @@
               )
             )
             ;; Se não conseguiu o ponto do current_block_obj, não pode encontrar o próximo
-            (princ (strcat "\n[ABS AVISO] Não foi possível obter o ponto do bloco atual (Handle: " 
-                           (if (and current_block_obj (vlax-property-available-p current_block_obj 'Handle)) (vla-get-Handle current_block_obj) "N/A") 
+            (princ (strcat "\n[ABS AVISO] Não foi possível obter o ponto do bloco atual (Handle: "
+                           (if (and current_block_obj (vlax-property-available-p current_block_obj 'Handle)) (vla-get-Handle current_block_obj) "N/A")
                            ") para continuar a ordenação."))
           )
           (setq current_block_obj closest_next_block) ; Define o próximo bloco a ser processado
         )
         (setq current_block_obj nil) ; Não há mais candidatos, encerra o loop while
+      )
       )
     )
   )
@@ -1035,6 +1063,7 @@
                        new_insertion_pt_list             ; Novo ponto de inserção como lista LISP
                        vla_operation_error_obj           ; Para capturar erros de operações VLA
                        modified_block_count              ; Contador
+                       point_map                         ; Cache de pontos de inserção
                      )
 
   ;; --- Manipulador de Erro Local ---
@@ -1108,9 +1137,12 @@
   )
   (princ (strcat "\nEncontradas " (itoa (length all_instances_of_block)) " instâncias totais do bloco '" first_block_name "'."))
 
+  ;; Gera mapa de pontos para evitar leituras repetidas
+  (setq point_map (IAN:abs-build-point-map all_instances_of_block))
+
   ;; --- Etapa 3b: Ordenar Blocos por Proximidade ---
   (princ "\nOrdenando blocos por proximidade...")
-  (setq ordered_block_sequence (IAN:abs-sort-blocks-by-proximity first_block_vla all_instances_of_block))
+  (setq ordered_block_sequence (IAN:abs-sort-blocks-by-proximity first_block_vla all_instances_of_block point_map))
   
   (if (or (null ordered_block_sequence) (< (length ordered_block_sequence) 2))
     (progn 
@@ -1128,7 +1160,7 @@
   (foreach block_vla_in_loop ordered_block_sequence
     (if (= 1 (rem index 2)) ; Aplica ao segundo, quarto, sexto, etc. (índices ímpares)
       (progn
-        (setq current_insertion_pt_list (IAN:abs-get-insertion-point-list block_vla_in_loop))
+        (setq current_insertion_pt_list (cdr (assoc (vla-get-Handle block_vla_in_loop) point_map)))
         (if current_insertion_pt_list
           (progn
             (setq new_insertion_pt_list 
@@ -1195,6 +1227,7 @@
                                block_vla_in_loop index           ; Para iteração
                                vla_operation_error_obj           ; Para capturar erros de operações VLA
                                deleted_block_count               ; Contador
+                               point_map                         ; Cache de pontos de inserção
                              )
 
   ;; --- Manipulador de Erro Local ---
@@ -1258,10 +1291,13 @@
   )
   (princ (strcat "\nEncontradas " (itoa (length all_instances_of_block)) " instâncias totais do bloco '" first_block_name "'."))
 
+  ;; Gera mapa de pontos para evitar leituras repetidas
+  (setq point_map (IAN:abs-build-point-map all_instances_of_block))
+
   ;; --- Etapa 3: Ordenar Blocos por Proximidade ---
   ;; Reutiliza a função auxiliar IAN:abs-sort-blocks-by-proximity
   (princ "\nOrdenando blocos por proximidade...")
-  (setq ordered_block_sequence (IAN:abs-sort-blocks-by-proximity first_block_vla all_instances_of_block))
+  (setq ordered_block_sequence (IAN:abs-sort-blocks-by-proximity first_block_vla all_instances_of_block point_map))
   
   (if (null ordered_block_sequence) ; Não precisa verificar < 2 aqui, pois até 1 bloco pode ser apagado se for o primeiro.
     (progn 
