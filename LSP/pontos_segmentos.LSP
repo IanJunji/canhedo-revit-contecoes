@@ -22,27 +22,43 @@
 (vl-load-com) ; Necessário para funções VLA (Visual LISP ActiveX)
 
 ;;; --- Funções Auxiliares Reutilizáveis ---
+
 (defun IAN:safe-open (path mode / h)
   (cond
     ((setq h (open path mode)) h)
-    (t (princ (strcat "\n[ERRO] Falha ao abrir: " path)) nil)))
+    (t (princ (strcat "\n[ERRO] Falha ao abrir: " path)) nil))
+)
 
 (defun IAN:close-handle (h)
-  (if h (progn (close h) nil) nil))
+  (if h (progn (close h) nil) nil)
+)
 
 (defun IAN:std-error (msg restore-fn)
-  (when restore-fn (restore-fn))
-  (unless (member msg '("Function cancelled" "quit / exit abort" "console break"))
-    (princ (strcat "\nErro: " msg)))
-  (princ))
+  (if restore-fn
+    (progn
+      (restore-fn) ; Executa a função de restauração
+    )
+  )
+  (if (not (member msg '("Function cancelled" "quit / exit abort" "console break")))
+    (princ (strcat "\nErro: " msg))
+  )
+  (princ)
+)
 
 (defun IAN:disable-osnap (/ prev)
   (setq prev (getvar "OSMODE"))
   (setvar "OSMODE" 0)
-  prev)
+  prev
+)
 
 (defun IAN:restore-osnap (prev)
-  (when prev (setvar "OSMODE" prev)))
+  (if prev
+    (progn
+      (setvar "OSMODE" prev)
+    )
+    ;; else (opcional): (princ "\n[IAN:restore-osnap] 'prev' é nil, nada a restaurar.")
+  )
+)
 
 ;;;; ----------------------------------------------------------------------;;;;
 ;;;                                                                        ;;;
@@ -504,6 +520,155 @@
   (princ)
 )
 (defun c:CBPM () (c:COLOCAR_BLOCO_EM_PONTOS_MEDIOS)) 
+
+
+;;;; ----------------------------------------------------------------------;;;;
+;;;                                                                        ;;;
+;;;   COMANDO: IAN_RotateThenOffsetBlock (RTOB) v1.0                     ;;;
+;;;   (Rotaciona no Ponto de Inserção e Desloca Perpendicularmente)        ;;;
+;;;                                                                        ;;;
+;;;; ----------------------------------------------------------------------;;;;
+;;; Autor: ian junji (Lógica ditada, implementado por Assistente AI)       ;;;
+;;; Versão: 1.0                                                            ;;;
+;;; Descrição: Rotaciona blocos selecionados em 180 graus em torno de seu  ;;;
+;;;            ponto de inserção (eixo Z). Em seguida, desloca cada bloco  ;;;
+;;;            uma distância especificada, 90 graus em relação à nova     ;;;
+;;;            orientação do bloco.                                        ;;;
+;;;-----------------------------------------------------------------------------
+
+(defun c:IAN_RotateThenOffsetBlock ( /
+                                    ;; Variáveis locais
+                                    *error*
+                                    s:old_cmdecho s:old_osmode ; Variáveis de sistema
+                                    offset_distance
+                                    ss_blocks total_selected i
+                                    ent_name vla_block
+                                    current_insertion_point_vla current_insertion_point_list
+                                    current_rotation_rad
+                                    new_block_rotation_rad
+                                    offset_angle_rad
+                                    new_ins_x new_ins_y new_ins_z
+                                    new_insertion_point_list
+                                    processed_count
+                                    error_obj
+                                  )
+
+  ;; --- Manipulador de Erro Local Simples ---
+  (defun *error* (msg)
+    (setq *error* nil) ; Previne recursão
+    (princ "\n\n!!!!!!!! [RTOB v1.0 *error*] !!!!!!!!")
+    (princ (strcat "\n  ERRO: " msg))
+    (if s:old_cmdecho (setvar "CMDECHO" s:old_cmdecho))
+    (if s:old_osmode (setvar "OSMODE" s:old_osmode))
+    (princ "\n  Comando RTOB interrompido.")
+    (princ "\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n")
+    (princ)
+  )
+
+  ;; --- Inicialização ---
+  (princ "\n>>> RTOB v1.0 - Rotacionar e Deslocar Blocos <<<")
+  (vl-load-com) ; Garante que COM está carregado
+  (setq s:old_cmdecho (getvar "CMDECHO")) (setvar "CMDECHO" 0)
+  (setq s:old_osmode (getvar "OSMODE"))   (setvar "OSMODE" 0)
+  (setq processed_count 0)
+
+  ;; 1. Pedir Comprimento do Offset
+  (initget 1) ; Não pode ser nulo
+  (setq offset_distance (getdist "\nDigite a distância para o deslocamento perpendicular (ex: 8.0): "))
+  (if (null offset_distance)
+    (progn (princ "\nDistância não fornecida. Comando cancelado.") (*error* "Cancelado pelo usuário") (exit))
+  )
+
+  ;; 2. Selecionar Blocos
+  (princ "\nSelecione os blocos para processar:")
+  (setq ss_blocks (ssget '((0 . "INSERT"))))
+
+  (if (null ss_blocks)
+    (progn (princ "\nNenhum bloco selecionado.") (*error* "Seleção cancelada") (exit))
+  )
+
+  (setq total_selected (sslength ss_blocks))
+  (princ (strcat "\n" (itoa total_selected) " bloco(s) selecionado(s). Processando..."))
+
+  ;; 3. Para Cada Bloco Selecionado
+  (setq i 0)
+  (while (< i total_selected)
+    (setq ent_name (ssname ss_blocks i))
+    (setq vla_block (vl-catch-all-apply 'vlax-ename->vla-object (list ent_name)))
+
+    (if (vl-catch-all-error-p vla_block)
+      (princ (strcat "\n  AVISO: Falha ao obter objeto VLA para " (vl-princ-to-string ent_name) ". Erro: " (vl-catch-all-error-message vla_block)))
+      (progn
+        (setq vla_block vla_block) ; Dereference
+        (princ (strcat "\n  Processando Bloco (Handle: " (if (vlax-property-available-p vla_block 'Handle) (vla-get-Handle vla_block) "N/A") ")..."))
+
+        ;; Obter Ponto de Inserção Atual
+        (setq current_insertion_point_vla (vl-catch-all-apply 'vla-get-InsertionPoint (list vla_block)))
+        (setq current_rotation_rad (vl-catch-all-apply 'vla-get-Rotation (list vla_block)))
+
+        (if (or (vl-catch-all-error-p current_insertion_point_vla)
+                (vl-catch-all-error-p current_rotation_rad))
+          (princ (strcat "\n    AVISO: Falha ao obter Ponto de Inserção ou Rotação."))
+          (progn
+            (setq current_insertion_point_list (vlax-safearray->list (vlax-variant-value current_insertion_point_vla)))
+            (setq current_rotation_rad current_rotation_rad) ; Já é o valor
+
+            ;; Rotacionar o Bloco em 180 graus em torno do ponto de inserção
+            (setq new_block_rotation_rad (+ current_rotation_rad PI))
+            (setq error_obj (vl-catch-all-apply 'vla-put-Rotation (list vla_block new_block_rotation_rad)))
+
+            (if (vl-catch-all-error-p error_obj)
+              (princ (strcat "\n    ERRO: Falha ao aplicar rotação de 180 graus: " (vl-catch-all-error-message error_obj)))
+              (progn
+                (princ (strcat "\n    Bloco rotacionado para " (angtos new_block_rotation_rad 0 4) " graus."))
+                
+                ;; Calcular o ângulo para o deslocamento (90 graus da nova direção do bloco)
+                (setq offset_angle_rad (- new_block_rotation_rad (/ PI 2.0))) ; PI/2 = 90 graus
+
+                ;; Calcular o novo ponto de inserção
+                (setq new_ins_x (+ (car current_insertion_point_list) (* offset_distance (cos offset_angle_rad))))
+                (setq new_ins_y (+ (cadr current_insertion_point_list) (* offset_distance (sin offset_angle_rad))))
+                (setq new_ins_z (caddr current_insertion_point_list)) ; Mantém o Z original
+                (setq new_insertion_point_list (list new_ins_x new_ins_y new_ins_z))
+
+                ;; Mover o Bloco (atualizar seu ponto de inserção)
+                (setq error_obj (vl-catch-all-apply 'vla-put-InsertionPoint (list vla_block (vlax-3d-point new_insertion_point_list))))
+
+                (if (vl-catch-all-error-p error_obj)
+                  (princ (strcat "\n    ERRO: Falha ao mover o bloco para o novo ponto: " (vl-catch-all-error-message error_obj)))
+                  (progn
+                    (princ (strcat "\n    Bloco movido para: " (vl-princ-to-string new_insertion_point_list)))
+                    (setq processed_count (1+ processed_count))
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+    (setq i (1+ i))
+  )
+
+  ;; --- Feedback Final ---
+  (princ "\n-----------------------------------------------------")
+  (if (> processed_count 0)
+    (princ (strcat "\nSucesso! " (itoa processed_count) " de " (itoa total_selected) " bloco(s) foram processados."))
+    (princ (strcat "\nNenhum bloco foi processado com sucesso de " (itoa total_selected) " selecionado(s). Verifique os avisos.")))
+  (princ "\n-----------------------------------------------------")
+
+  ;; --- Limpeza Final ---
+  (if s:old_cmdecho (setvar "CMDECHO" s:old_cmdecho))
+  (if s:old_osmode (setvar "OSMODE" s:old_osmode))
+  (princ "\nComando RTOB v1.0 concluído.")
+  (princ)
+)
+
+;; Alias para o comando
+(defun c:RTOB () (c:IAN_RotateThenOffsetBlock))
+(princ "\nComando RTOB v1.0 (Rotacionar e Deslocar) carregado. Digite RTOB para executar.")
+(princ)
+
 
 ;;;; ----------------------------------------------------------------------;;;;
 ;;;                                                                        ;;;
