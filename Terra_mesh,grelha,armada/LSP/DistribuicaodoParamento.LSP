@@ -4,19 +4,9 @@
 ;;;                                                                        ;;;
 ;;;------------------------------------------------------------------------;;;
 ;;;                                                                        ;;;
-;;; Comandos Definidos:                                                    ;;;
-;;;   GERAR_PONTOS_REGUA           (GPR)                                   ;;;
-;;;     Gera um arquivo TXT com coordenadas de pontos ao longo de curvas,  ;;;
-;;;     usando um método de "régua de aço" (cordas de comprimento fixo).   ;;;
-;;;                                                                        ;;;
-;;;   COLOCAR_BLOCO_EM_PONTOS_MEDIOS (CBPM)                                ;;;
-;;;     Lê coordenadas de um arquivo TXT, calcula os pontos médios entre   ;;;
-;;;     pares de pontos consecutivos e insere um bloco selecionado nesses  ;;;
-;;;     pontos médios, alinhado com o segmento original.                   ;;;
-;;;                                                                        ;;;
-;;; -----------------------------------------------------------------------;;;
 ;;; Autor: ian junji                                                       ;;;
-;;; Versão: 0.5                                                            ;;;
+;;; Versão: 0.8                                                            ;;;
+;;;                                                                        ;;;
 ;;;; ----------------------------------------------------------------------;;;;
 
 (vl-load-com) ; Necessário para funções VLA (Visual LISP ActiveX)
@@ -128,7 +118,7 @@
 ;;;                                                                        ;;;
 ;;;; ----------------------------------------------------------------------;;;;
 
-;;; --- Função Auxiliar para GPR: Encontrar Próximo Ponto com Régua (v0.7) ---
+;;; --- Função Auxiliar para GPR: Encontrar Próximo Ponto com Régua  ---
 (defun IAN:gpr-find-next-point (obj_curva pt_inicio comp_regua tol / mspace 
                                 melhor_ponto_B circulo_temp_raw circulo_obj 
                                 pontos_intersecao_variant pontos_intersecao_sa 
@@ -817,12 +807,10 @@
 
 ;;;; ----------------------------------------------------------------------;;;;
 ;;;                                                                        ;;;
-;;;   COMANDO: IAN_RotateThenOffsetBlock (RTOB) v1.0                     ;;;
+;;;   COMANDO: IAN_RotateThenOffsetBlock (RTOB)                            ;;;
 ;;;   (Rotaciona no Ponto de Inserção e Desloca Perpendicularmente)        ;;;
 ;;;                                                                        ;;;
 ;;;; ----------------------------------------------------------------------;;;;
-;;; Autor: ian junji (Lógica ditada, implementado por Assistente AI)       ;;;
-;;; Versão: 1.0                                                            ;;;
 ;;; Descrição: Rotaciona blocos selecionados em 180 graus em torno de seu  ;;;
 ;;;            ponto de inserção (eixo Z). Em seguida, desloca cada bloco  ;;;
 ;;;            uma distância especificada, 90 graus em relação à nova     ;;;
@@ -1434,7 +1422,7 @@
 )
 
 ;;;
-;;; c:CRIAR_CAMADAS_BLOCO_ESCADINHA (CBE) - v2.1 (Refatorada)
+;;; c:CRIAR_CAMADAS_BLOCO_ESCADINHA (CBE) 
 ;;; Função principal que atua como um dispatcher, decidindo qual modo executar.
 ;;;
 (defun c:CRIAR_CAMADAS_BLOCO_ESCADINHA (/ *error* old_cmdecho old_clayer old_osmode 
@@ -1540,7 +1528,7 @@
   (IAN:restore-osnap old_osmode)
   (princ)
 )
-(defun c:CBE () (c:CRIAR_CAMADAS_BLOCO_ESCADINHA)) ; Alias curto
+(defun c:CBE () (c:CRIAR_CAMADAS_BLOCO_ESCADINHA)) 
 
 
 ;;;; ----------------------------------------------------------------------;;;;
@@ -2109,7 +2097,6 @@
   (IAN:restore-osnap old_osmode)
   (princ)
 )
-;;; Alias curto para o comando
 (defun c:DELBLOCINV () (c:APAGAR_BLOCOS_INTERCALADOS_INVERSO))
 
 
@@ -2267,29 +2254,41 @@
 (defun c:EXDBLK () (c:EXPORTAR_DADOS_BLOCOS)) ; Alias curto
 
 
-
-
 ;;;; ----------------------------------------------------------------------;;;;
 ;;; 								Comandos Separados por tipo de muro                    ;;;
 ;;;; ----------------------------------------------------------------------;;;;
 
-;;; --- Função de Desenho para o Menu Gráfico (v2.0 - usando ENTMAKE) ---
-(defun IAN:desenhar-menu-grafico (titulo opcoes p1 p2 item_height item_realcado texto_size /
-                                  entidades_de_texto i start_y texto_y texto_x cor)
+;;; --- Função de Desenho para o Menu Gráfico ---
+(defun IAN:desenhar-menu-grafico (titulo opcoes p1 p2 p3 p4 item_height item_realcado texto_size /
+                                  entidades_menu i start_y texto_y texto_x cor)
   
-  ;; Desenha a borda e o fundo realçado com grdraw, que funciona.
+  (setq entidades_menu nil)
+
+  ;; --- 1. CRIA O FUNDO SÓLIDO PRIMEIRO ---
+  (entmake (list '(0 . "SOLID")
+                 (cons 10 p1) ; Canto Superior Esquerdo
+                 (cons 11 p2) ; Canto Superior Direito
+                 (cons 12 p4) ; Canto Inferior Esquerdo
+                 (cons 13 p3) ; Canto Inferior Direito
+                 '(62 . 8)   ; Cor (Cinza Escuro)
+           )
+  )
+  (setq entidades_menu (cons (entlast) entidades_menu))
+
+
+  ;; --- 2. DESENHA A BORDA E O REALCE TEMPORÁRIO ---
   (grdraw p1 p2 7) (grdraw p2 p3 7) (grdraw p3 p4 7) (grdraw p4 p1 7)
   (if (and item_realcado (>= item_realcado 0))
     (progn
       (setq start_y (- (cadr p1) (* item_height 1.5)))
       (setq texto_y (- start_y (* item_realcado item_height)))
-      (grdraw (list (car p1) (+ texto_y item_height)) (list (car p2) (+ texto_y item_height)) 5)
-      (grdraw (list (car p1) texto_y) (list (car p2) texto_y) 5)
+      ;; Usa uma cor brilhante para o realce, como amarelo
+      (grdraw (list (car p1) (+ texto_y item_height)) (list (car p2) (+ texto_y item_height)) 2)
+      (grdraw (list (car p1) texto_y) (list (car p2) texto_y) 2)
     )
   )
 
-  ;; --- CRIA ENTIDADES DE TEXTO REAIS ---
-  (setq entidades_de_texto nil)
+  ;; --- 3. CRIA ENTIDADES DE TEXTO REAIS SOBRE O FUNDO ---
   
   ;; Cria a entidade de Título
   (entmake (list '(0 . "TEXT")
@@ -2300,7 +2299,7 @@
                  '(62 . 6) ; Cor (Magenta)
            )
   )
-  (setq entidades_de_texto (cons (entlast) entidades_de_texto))
+  (setq entidades_menu (cons (entlast) entidades_menu))
 
   ;; Cria as entidades das Opções
   (setq i 0)
@@ -2308,7 +2307,8 @@
   (setq texto_x (+ (car p1) (* item_height 0.5)))
   (foreach opcao opcoes
     (setq texto_y (- start_y (* i item_height)))
-    (setq cor (if (= i item_realcado) 7 255)) ; Branco se realçado, Padrão se não
+    ;; O texto fica sempre branco, o fundo que muda (com grdraw)
+    (setq cor 7)
     
     (entmake (list '(0 . "TEXT")
                    (cons 10 (list texto_x texto_y 0))
@@ -2318,15 +2318,15 @@
                    (cons 62 cor)
              )
     )
-    (setq entidades_de_texto (cons (entlast) entidades_de_texto))
+    (setq entidades_menu (cons (entlast) entidades_menu))
     (setq i (1+ i))
   )
   
-  (reverse entidades_de_texto) ; Retorna a lista de entidades criadas
+  (reverse entidades_menu) ; Retorna a lista de todas as entidades criadas (fundo + textos)
 )
 
 
-;;; --- Função Principal do Menu Gráfico (v2.0 - usando ENTMAKE) ---
+;;; --- Função Principal do Menu Gráfico ---
 (defun IAN:menu-grafico (titulo opcoes /
                          view_center view_height box_width box_height half_width half_height
                          p1 p2 p3 p4 item_height start_y i texto_y texto_x
@@ -2357,8 +2357,8 @@
     )
     (redraw) ; Limpa os gráficos temporários (realce)
 
-    ;; Desenha o novo menu e guarda as entidades de texto criadas
-    (setq entidades_menu_atual (IAN:desenhar-menu-grafico titulo opcoes p1 p2 item_height ultimo_item_realcado texto_size))
+    ;; *** CORREÇÃO AQUI: Adicionados p3 e p4 à chamada da função de desenho ***
+    (setq entidades_menu_atual (IAN:desenhar-menu-grafico titulo opcoes p1 p2 p3 p4 item_height ultimo_item_realcado texto_size))
     
     (setq mouse_data (grread T 15 0))
     (setq codigo_input (car mouse_data))
@@ -2466,14 +2466,6 @@
 )
 
 
-
-
-
-
-
-
-
-
 ;;;; ----------------------------------------------------------------------;;;;
 ;;; Mensagem de Carregamento Final                                         ;;;
 ;;;; ----------------------------------------------------------------------;;;;
@@ -2486,4 +2478,3 @@
 (princ "\n  EXPORTAR_DADOS_BLOCOS (EXDBLK)") 
 (princ "\nDigite o nome do comando ou seu alias (entre parênteses) para usar.")
 (princ)
-
