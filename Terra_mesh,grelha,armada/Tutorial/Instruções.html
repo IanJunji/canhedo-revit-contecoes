@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentação - LSP contenções</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        /* Estilos personalizados para complementar o Tailwind */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* gray-900 */
+            color: #d1d5db; /* gray-300 */
+        }
+        h1, h2, h3, h4 {
+            font-weight: 700;
+            color: #f9fafb; /* gray-50 */
+        }
+        .fira-code {
+            font-family: 'Fira Code', monospace;
+        }
+        .sidebar-link {
+            transition: all 0.2s ease-in-out;
+            border-left: 2px solid transparent;
+        }
+        .sidebar-link:hover, .sidebar-link.active {
+            color: #38bdf8; /* sky-400 */
+            border-left-color: #38bdf8;
+            transform: translateX(4px);
+        }
+        .main-tab-link {
+            transition: all 0.2s ease-in-out;
+            border-bottom: 2px solid transparent;
+        }
+        .main-tab-link.active-main-tab {
+            color: #38bdf8; /* sky-400 */
+            border-bottom-color: #38bdf8;
+        }
+        .content-section code {
+            background-color: #374151; /* gray-700 */
+            color: #f9fafb;
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.9em;
+        }
+        .alias-block {
+            background-color: #1f2937; /* gray-800 */
+            border: 1px solid #4b5563; /* gray-600 */
+            border-radius: 0.375rem; /* rounded-md */
+            padding: 0.75rem; /* p-3 */
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .copy-btn {
+            background-color: #4b5563; /* gray-600 */
+            color: #d1d5db; /* gray-300 */
+            border: none;
+            border-radius: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s, background-color 0.2s;
+        }
+        .alias-block:hover .copy-btn {
+            opacity: 1;
+        }
+        .copy-btn:hover {
+            background-color: #38bdf8;
+            color: #fff;
+        }
+        .copied-feedback {
+            position: absolute;
+            top: 50%;
+            right: 0.75rem; /* p-3 */
+            transform: translateY(-50%);
+            background-color: #10b981; /* green-500 */
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+        /* Estilos para as abas */
+        .tab-content {
+            display: none; /* Esconde todas as abas por padrão */
+        }
+        .tab-content.active-tab {
+            display: block; /* Mostra a aba ativa */
+        }
+        .sidebar-nav {
+            display: none;
+        }
+        .sidebar-nav.active-sidebar {
+            display: block;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- Header com Navegação Principal (Abas) -->
+    <header class="bg-gray-900/70 backdrop-blur-sm border-b border-gray-700/50 sticky top-0 z-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="py-4">
+                <h1 class="text-3xl font-bold text-sky-400">LSP Contenções</h1>
+                <p class="text-gray-400 mt-1">Manual de Uso e Referência de Comandos para AutoCAD</p>
+            </div>
+            <nav id="main-tabs" class="flex space-x-8">
+                <a href="#" data-tab="comandos" class="main-tab-link py-3 px-1 font-medium text-lg active-main-tab">Comandos Gerais</a>
+                <a href="#" data-tab="terra-mesh" class="main-tab-link py-3 px-1 font-medium text-lg">Terra Mesh</a>
+                <a href="#" data-tab="geogrelha" class="main-tab-link py-3 px-1 font-medium text-lg">Geogrelha</a>
+                <a href="#" data-tab="terra-armada" class="main-tab-link py-3 px-1 font-medium text-lg">Terra Armada</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex flex-col lg:flex-row gap-8 py-8">
+
+            <!-- Sidebar de Navegação Dinâmica -->
+            <aside class="lg:w-1/4 lg:sticky lg:top-36 self-start z-10">
+                
+                <!-- Barra de Navegação para Comandos Gerais -->
+                <nav id="sidebar-comandos" class="sidebar-nav active-sidebar space-y-1">
+                    <h3 class="text-lg font-semibold mb-3 text-sky-200 px-2">Comandos</h3>
+                    <a href="#gpr" class="sidebar-link block p-2 font-medium">GPR (Gerar Pontos)</a>
+                    <a href="#cbpm" class="sidebar-link block p-2 font-medium">CBPM (Colocar Bloco)</a>
+                    <a href="#rtob" class="sidebar-link block p-2 font-medium">RTOB (Rotacionar/Offset)</a>
+                    <a href="#cbe" class="sidebar-link block p-2 font-medium">CBE (Bloco em Escadinha)</a>
+                    <a href="#abs" class="sidebar-link block p-2 font-medium">ABS (Alterar Altura Seq.)</a>
+                    <a href="#delblocinv" class="sidebar-link block p-2 font-medium">DELBLOCINV (Apagar Intercalado)</a>
+                    <a href="#exdblk" class="sidebar-link block p-2 font-medium">EXDBLK (Exportar Dados)</a>
+                </nav>
+
+                <!-- Barra de Navegação para Terra Mesh -->
+                <nav id="sidebar-terra-mesh" class="sidebar-nav space-y-1">
+                    <h3 class="text-lg font-semibold mb-3 text-sky-200 px-2">Etapas Terra Mesh</h3>
+                    <a href="#tm-step1" class="sidebar-link block p-2 font-medium">1. Preparação da Linha</a>
+                    <a href="#tm-step2" class="sidebar-link block p-2 font-medium">2. Geração de Pontos</a>
+                    <a href="#tm-step3" class="sidebar-link block p-2 font-medium">3. Inserção de Blocos</a>
+                    <a href="#tm-step4" class="sidebar-link block p-2 font-medium">4. Ajuste Manual</a>
+                    <a href="#tm-step5" class="sidebar-link block p-2 font-medium">5. Criação de Camadas</a>
+                    <a href="#tm-step6" class="sidebar-link block p-2 font-medium">6. Extração de Dados</a>
+                </nav>
+
+                <!-- Barra de Navegação para Geogrelha -->
+                <nav id="sidebar-geogrelha" class="sidebar-nav space-y-1">
+                     <h3 class="text-lg font-semibold mb-3 text-sky-200 px-2">Etapas Geogrelha</h3>
+                    <a href="#gg-step1" class="sidebar-link block p-2 font-medium">1. Preparação da Linha</a>
+                    <a href="#gg-step2" class="sidebar-link block p-2 font-medium">2. Geração de Pontos</a>
+                    <a href="#gg-step3" class="sidebar-link block p-2 font-medium">3. Inserção de Blocos</a>
+                    <a href="#gg-step4" class="sidebar-link block p-2 font-medium">4. Ajuste Manual</a>
+                    <a href="#gg-step5" class="sidebar-link block p-2 font-medium">5. Ajuste de Orientação</a>
+                    <a href="#gg-step6" class="sidebar-link block p-2 font-medium">6. Criação de Camadas</a>
+                    <a href="#gg-step7" class="sidebar-link block p-2 font-medium">7. Extração de Dados</a>
+                </nav>
+
+                <!-- Barra de Navegação para Terra Armada -->
+                <nav id="sidebar-terra-armada" class="sidebar-nav space-y-1">
+                    <h3 class="text-lg font-semibold mb-3 text-sky-200 px-2">Etapas Terra Armada</h3>
+                    <a href="#ta-step1" class="sidebar-link block p-2 font-medium">1. Preparação da Linha</a>
+                    <a href="#ta-step2" class="sidebar-link block p-2 font-medium">2. Geração de Pontos</a>
+                    <a href="#ta-step3" class="sidebar-link block p-2 font-medium">3. Inserção de Blocos</a>
+                    <a href="#ta-step4" class="sidebar-link block p-2 font-medium">4. Ajuste Manual</a>
+                    <a href="#ta-step5" class="sidebar-link block p-2 font-medium">5. Ajuste de Altura</a>
+                    <a href="#ta-step6" class="sidebar-link block p-2 font-medium">6. Remoção Intercalada</a>
+                    <a href="#ta-step7" class="sidebar-link block p-2 font-medium">7. Extração de Dados</a>
+                </nav>
+
+            </aside>
+
+            <!-- Conteúdo Principal -->
+            <main class="lg:w-3/4 space-y-16">
+                
+                <!-- Seção 1: Organização do Desenho (sempre visível) -->
+                <section id="organizacao" class="content-section scroll-mt-24">
+                    <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2 mb-4">Organização do Desenho para o Funcionamento da LSP</h2>
+                    <div class="space-y-6 text-lg">
+                        <p>Para garantir o funcionamento correto das ferramentas, especialmente as de geração e inserção de blocos em sequência, é crucial que o desenho base esteja preparado adequadamente antes de executar os comandos.</p>
+                        
+                        <div>
+                            <h3 class="text-xl font-semibold mb-2 text-sky-300">Linhas de Base e Divisibilidade</h3>
+                            <ul class="list-disc list-inside space-y-3 pl-4">
+                                <li>A <strong>linha de base (eixo)</strong> utilizada para gerar pontos com o comando <code class="fira-code">GPR</code> deve representar o alinhamento exato da face da estrutura de contenção.</li>
+                                <li><strong>Regra Geral de Divisibilidade:</strong> O comprimento total desta linha de base deve ser um <strong class="text-sky-400">múltiplo exato</strong> da dimensão do bloco que será utilizado.
+                                    <ul class="list-['-_'] list-inside pl-6 mt-2">
+                                        <li><strong>Exemplo:</strong> Se você usará blocos de 2.50 metros de comprimento, a linha de base deve ter um comprimento como 10m, 12.5m, 25m, ou qualquer outro valor divisível por 2.50.</li>
+                                    </ul>
+                                </li>
+                                <li>Essa preparação garante que o último bloco se encaixe perfeitamente no final do alinhamento, sem sobras ou faltas, evitando retrabalho manual.</li>
+                                 <li>Existem exceções a esta regra, como em casos de fechamentos de vãos ou ajustes especiais, que podem ser tratados manualmente após a execução da rotina principal.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+                
+                <hr class="border-gray-700 my-8">
+
+                <!-- Área de Conteúdo das Abas -->
+                <div id="tab-container">
+                    
+                    <!-- Aba: Comandos Gerais (Visível por padrão) -->
+                    <section id="comandos-tab-content" class="tab-content active-tab space-y-16">
+                        
+                        <div id="comandos" class="content-section scroll-mt-36">
+                             <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">Visão Geral dos Comandos</h2>
+                            <div class="mt-4 space-y-4">
+                                <p class="text-lg">Use o comando <code class="fira-code">COMANDOS</code> no AutoCAD para listar todas as ferramentas. Esta seção detalha cada uma delas.</p>
+                            </div>
+                        </div>
+
+                        <div id="gpr" class="content-section scroll-mt-36">
+                            <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">GERAR_PONTOS_REGUA</h2>
+                            <div class="mt-4 space-y-6">
+                                <div class="relative alias-block">
+                                    <span class="fira-code text-sky-400 font-semibold">Alias: GPR</span>
+                                    <button class="copy-btn" data-text="GPR" title="Copiar alias"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                                </div>
+                                <p class="text-lg">Gera um arquivo <code>.txt</code> com coordenadas de pontos ao longo de curvas, com espaçamento de corda fixo (método da "régua de aço").</p>
+                            </div>
+                        </div>
+
+                        <div id="cbpm" class="content-section scroll-mt-36">
+                             <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">COLOCAR_BLOCO_EM_PONTOS_MEDIOS</h2>
+                             <div class="mt-4 space-y-6">
+                                <div class="relative alias-block">
+                                    <span class="fira-code text-sky-400 font-semibold">Alias: CBPM</span>
+                                    <button class="copy-btn" data-text="CBPM" title="Copiar alias"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                                </div>
+                                <p class="text-lg">Insere um bloco no ponto médio de segmentos definidos por um arquivo de coordenadas, alinhando-o automaticamente.</p>
+                            </div>
+                        </div>
+                        
+                        <div id="rtob" class="content-section scroll-mt-36">
+                            <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">RotacionarGeogrelhas</h2>
+                             <div class="mt-4 space-y-6">
+                                <div class="relative alias-block">
+                                    <span class="fira-code text-sky-400 font-semibold">Alias: RTGG</span>
+                                    <button class="copy-btn" data-text="RTOB" title="Copiar alias"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                                </div>
+                                <p class="text-lg">Rotaciona blocos em 180° e os desloca perpendicularmente à sua <strong class="text-sky-400">nova</strong> orientação.</p>
+                            </div>
+                        </div>
+
+                        <div id="cbe" class="content-section scroll-mt-36">
+                            <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">CRIAR_CAMADAS_BLOCO_ESCADINHA</h2>
+                             <div class="mt-4 space-y-6">
+                                <div class="relative alias-block">
+                                    <span class="fira-code text-sky-400 font-semibold">Alias: CBE</span>
+                                    <button class="copy-btn" data-text="CBE" title="Copiar alias"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                                </div>
+                                <p class="text-lg">Cria cópias de blocos em camadas, formando uma "escadinha" ideal para contenções e taludes.</p>
+                            </div>
+                        </div>
+
+                        <div id="abs" class="content-section scroll-mt-36">
+                             <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">ALTBLOCOSEQ</h2>
+                             <div class="mt-4 space-y-6">
+                                <div class="relative alias-block">
+                                     <span class="fira-code text-sky-400 font-semibold">Alias: ABS</span>
+                                    <button class="copy-btn" data-text="ABS" title="Copiar alias"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                                </div>
+                                <p class="text-lg">Altera a altura (Z) de blocos de forma intercalada (um sim, um não), seguindo uma sequência por proximidade.</p>
+                            </div>
+                        </div>
+                        
+                        <div id="delblocinv" class="content-section scroll-mt-36">
+                            <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">APAGAR_BLOCOS_INTERCALADOS_INVERSO</h2>
+                            <div class="mt-4 space-y-6">
+                                <div class="relative alias-block">
+                                     <span class="fira-code text-sky-400 font-semibold">Alias: DELBLOCINV</span>
+                                    <button class="copy-btn" data-text="DELBLOCINV" title="Copiar alias"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                                </div>
+                                <p class="text-lg">Apaga blocos de forma intercalada (primeiro sim, segundo não, etc.), baseado na proximidade a partir de um bloco inicial.</p>
+                            </div>
+                        </div>
+
+                        <div id="exdblk" class="content-section scroll-mt-36">
+                            <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">EXPORTAR_DADOS_BLOCOS</h2>
+                            <div class="mt-4 space-y-6">
+                                <div class="relative alias-block">
+                                    <span class="fira-code text-sky-400 font-semibold">Alias: EXDBLK</span>
+                                    <button class="copy-btn" data-text="EXDBLK" title="Copiar alias"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                                </div>
+                                <p class="text-lg">Exporta os dados de Ponto de Inserção (X,Y,Z) e Rotação (em Radianos) de blocos selecionados para um arquivo <code>.txt</code>.</p>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Aba: Terra Mesh -->
+                    <section id="terra-mesh-tab-content" class="tab-content">
+                        <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">Aplicação: Terra Mesh</h2>
+                        <div class="mt-4 space-y-6 text-lg">
+                            <p>Fluxo de trabalho recomendado para modelagem de contenções tipo <strong class="text-sky-400">Terra Mesh</strong>.</p>
+                            <ol class="list-decimal list-inside space-y-6 pl-4 mt-6">
+                                <li id="tm-step1" class="content-section scroll-mt-36">✍️ <strong class="text-lg">Preparação da Linha de Base:</strong><br>
+                                    <p class="mt-2">Ao trabalhar com contenções tipo Terra Mesh, a linha de base para geração de pontos deve seguir as seguintes orientações, sempre considerando a direção do muro:</p>
+                                    <ul class="list-disc list-inside space-y-2 pl-4 mt-2">
+                                        <li><strong>Curvas para a Esquerda:</strong> Mantenha o <strong class="text-amber-400">alinhamento original</strong> da face do muro como sua linha de base.</li>
+                                        <li><strong>Curvas para a Direita:</strong> A linha de inserção para os blocos deve ser a <strong class="text-amber-400">linha de topo</strong> da camada final. Para isso:
+                                            <ul class="list-['-_'] list-inside pl-6 mt-1">
+                                                <li>Defina a elevação na coordenada Z para a camada final do muro.</li>
+                                                <li>Aplique um <strong class="text-amber-400">offset com o valor do deslocamento total</strong> da curva em relação à linha de base original.</li>
+                                                <li>O comprimento final desta linha offsetada deve ser <strong class="text-amber-400">exatamente divisível</strong> pelo tamanho da caixa (bloco) que será utilizada.</li>
+                                            </ul>
+                                        </li>
+                                    </ul>
+                                </li>
+                                <li id="tm-step2" class="content-section scroll-mt-36">📏 <strong class="text-lg">Geração de Pontos:</strong><br>
+                                    Execute o comando <code class="fira-code">GPR</code> (Gerar Pontos Régua) nas linhas de base e topo preparadas.
+                                </li>
+                                <li id="tm-step3" class="content-section scroll-mt-36">🧱 <strong class="text-lg">Inserção de Blocos na Base:</strong><br>
+                                    Use o comando <code class="fira-code">CBPM</code> (Colocar Bloco em Pontos Médios) utilizando o arquivo de pontos gerado e o bloco modelo da sua caixa Terra Mesh.
+                                </li>
+                                <li id="tm-step4" class="content-section scroll-mt-36">🗑️ <strong class="text-lg">Ajuste Manual dos Blocos:</strong><br>
+                                    Após a inserção, é comum que alguns blocos intermediários (especialmente em curvas apertadas ou onde há transições) fiquem com posições incorretas ou sobrepostas. <strong class="text-amber-400">Apague manualmente</strong> esses blocos para limpar o modelo.
+                                </li>
+                                <li id="tm-step5" class="content-section scroll-mt-36">🪜 <strong class="text-lg">Criação das Camadas (Escadinha):</strong><br>
+                                    Execute <code class="fira-code">CBE</code> duas vezes:
+                                    <ul class="list-['-_'] list-inside space-y-2 pl-6 mt-1">
+                                        <li><strong>Camadas de Subida:</strong> Selecione os blocos da <strong class="text-sky-400">linha de base</strong> e configure o comando para <strong class="text-sky-400">SUBIR</strong>, definindo o offset horizontal, a altura vertical e a cota Z final desejada.</li>
+                                        <li><strong>Camadas de Descida:</strong> Selecione os blocos da <strong class="text-sky-400">linha de topo</strong> (a camada final do muro) e configure o comando para <strong class="text-sky-400">DESCER</strong>. Defina os offsets e altura, visando uma cota Z final que cubra a profundidade total do muro.</li>
+                                    </ul>
+                                </li>
+                                <li id="tm-step6" class="content-section scroll-mt-36">📤 <strong class="text-lg">Extração de Dados para o Revit:</strong><br>
+                                    Use <code class="fira-code">EXDBLK</code> (Exportar Dados Blocos) para extrair as coordenadas (X,Y,Z) e ângulos de rotação de todos os blocos gerados, em um arquivo de texto. Este arquivo pode ser importado para o Revit para posicionamento de elementos.
+                                </li>
+                            </ol>
+                        </div>
+                    </section>
+
+                    <!-- Aba: Geogrelha -->
+                    <section id="geogrelha-tab-content" class="tab-content">
+                        <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">Aplicação: Geogrelha</h2>
+                        <div class="mt-4 space-y-6 text-lg">
+                            <p>Fluxo de trabalho recomendado para modelar contenções com <strong class="text-sky-400">Geogrelha</strong>.</p>
+                             <ol class="list-decimal list-inside space-y-6 pl-4 mt-6">
+                                <li id="gg-step1" class="content-section scroll-mt-36">✍️ <strong class="text-lg">Preparação da Linha de Base:</strong><br>
+                                    <p class="mt-2">Para contenções com Geogrelha, as regras de alinhamento e offset são cruciais, e há uma etapa adicional importante:</p>
+                                    <ul class="list-disc list-inside space-y-2 pl-4 mt-2">
+                                        <li><strong>Curvas para a Esquerda:</strong> Utilize o <strong class="text-amber-400">alinhamento original</strong> da face do muro como linha de base.</li>
+                                        <li><strong>Curvas para a Direita:</strong> A linha de inserção deve ser a <strong class="text-amber-400">linha de topo</strong> da camada final. Considere:
+                                            <ul class="list-['-_'] list-inside pl-6 mt-1">
+                                                <li>Defina a elevação na coordenada Z para a camada final do muro.</li>
+                                                <li>O offset deve ser calculado como: <strong class="text-amber-400">deslocamento total da curva + tamanho da placa</strong>.
+                                                    <ul class="list-['--'] list-inside pl-6 mt-1">
+                                                        <li><strong>Exemplo:</strong> Se o offset total final do bloco é de 0.9 metros e o comprimento da geogrelha é de 8 metros, o offset a ser usado para a linha de inserção será de <strong class="text-amber-400">0.9 + 8 = 8.9 metros</strong>.</li>
+                                                    </ul>
+                                                </li>
+                                                <li>O comprimento final desta linha offsetada deve ser <strong class="text-amber-400">exatamente divisível</strong> pelo tamanho da caixa (bloco) que será utilizada.</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>Passo Pós-Verificação:</strong> Após garantir a correção do comprimento, offset e elevação da linha, é <strong class="text-amber-400">obrigatório aplicar o comando <code class="fira-code">REVERSE</code></strong> nesta linha. Isso garante que a orientação da linha esteja correta para a inserção dos blocos, especialmente em curvas.</li>
+                                    </ul>
+                                </li>
+                                <li id="gg-step2" class="content-section scroll-mt-36">📏 <strong class="text-lg">Geração de Pontos:</strong><br>
+                                    Execute <code class="fira-code">GPR</code> (Gerar Pontos Régua) nas linhas de base e topo preparadas.
+                                </li>
+                                <li id="gg-step3" class="content-section scroll-mt-36">🧱 <strong class="text-lg">Inserção de Blocos na Base:</strong><br>
+                                    Execute <code class="fira-code">CBPM</code> (Colocar Bloco em Pontos Médios) utilizando o arquivo de pontos gerado e o bloco modelo da sua caixa de Geogrelha.
+                                </li>
+                                <li id="gg-step4" class="content-section scroll-mt-36">🗑️ <strong class="text-lg">Ajuste Manual dos Blocos:</strong><br>
+                                    Após a inserção, <strong class="text-amber-400">apague manualmente</strong> quaisquer blocos intermediários que fiquem incorretos ou sobrepostos.
+                                </li>
+                                <li id="gg-step5" class="content-section scroll-mt-36">🔄 <strong class="text-lg">Ajuste de Orientação das Geogrelhas:</strong><br>
+                                    Para as geogrelhas geradas ao longo das linhas que foram previamente ajustadas com o comando <code class="fira-code">REVERSE</code>, selecione todos os blocos correspondentes e execute o comando <code class="fira-code">RTOB</code> (Rotacionar/Offset Bloco). Isso garantirá a correta orientação e deslocamento.
+                                </li>
+                                <li id="gg-step6" class="content-section scroll-mt-36">🪜 <strong class="text-lg">Criação de Camadas (Escadinha):</strong><br>
+                                    Execute <code class="fira-code">CBE</code> (Criar Camadas Bloco Escadinha) para <strong class="text-sky-400">SUBIR</strong> a partir da base e depois para <strong class="text-sky-400">DESCER</strong> a partir do topo, ajustando offsets e altura para cobrir a profundidade total.
+                                </li>
+                                <li id="gg-step7" class="content-section scroll-mt-36">📤 <strong class="text-lg">Extração de Dados para o Revit:</strong><br>
+                                    Finalize executando o comando <code class="fira-code">EXDBLK</code> (Exportar Dados Blocos) para gerar o arquivo <code>.txt</code> com X,Y,Z e ângulos para importação no Revit.
+                                </li>
+                            </ol>
+                        </div>
+                    </section>
+
+                    <!-- Aba: Terra Armada -->
+                    <section id="terra-armada-tab-content" class="tab-content">
+                        <h2 class="text-2xl font-bold border-b-2 border-sky-500 pb-2">Aplicação: Terra Armada</h2>
+                        <div class="mt-4 space-y-6 text-lg">
+                           <p>Fluxo de trabalho recomendado para modelar contenções tipo <strong class="text-sky-400">Terra Armada</strong>.</p>
+                            <ol class="list-decimal list-inside space-y-6 pl-4 mt-6">
+                                <li id="ta-step1" class="content-section scroll-mt-36">✍️ <strong class="text-lg">Preparação da Linha de Base:</strong><br>
+                                    <p class="mt-2">Para contenções tipo Terra Armada, o requisito principal está na preparação da linha que definirá a profundidade da estrutura:</p>
+                                    <ul class="list-disc list-inside space-y-2 pl-4 mt-2">
+                                        <li><strong>Geração da Linha:</strong> Crie uma nova linha com um <strong class="text-amber-400">offset com o valor da profundidade do muro</strong>. Esta linha servirá como referência para as operações subsequentes.</li>
+                                        <li><strong>Divisibilidade:</strong> É fundamental garantir que todos os segmentos desta linha (e de qualquer linha de base utilizada) sejam <strong class="text-amber-400">divisíveis exatamente</strong> pelo segmento definido para os elementos da contenção.</li>
+                                    </ul>
+                                </li>
+                                <li id="ta-step2" class="content-section scroll-mt-36">📏 <strong class="text-lg">Geração de Pontos:</strong><br>
+                                    Execute o comando <code class="fira-code">GPR</code> (Gerar Pontos Régua) nas linhas de base preparadas.
+                                </li>
+                                <li id="ta-step3" class="content-section scroll-mt-36">🧱 <strong class="text-lg">Inserção dos Blocos (Inteiros e Meio Blocos):</strong><br>
+                                    Execute o comando <code class="fira-code">CBPM</code> (Colocar Bloco em Pontos Médios) duas vezes:
+                                    <ul class="list-['-_'] list-inside pl-6 mt-1">
+                                        <li>Uma vez para o <strong class="text-sky-400">bloco inteiro</strong>.</li>
+                                        <li>Outra vez para o <strong class="text-sky-400">meio bloco</strong>.</li>
+                                    </ul>
+                                </li>
+                                <li id="ta-step4" class="content-section scroll-mt-36">🗑️ <strong class="text-lg">Ajuste Manual dos Blocos:</strong><br>
+                                    Após a inserção, <strong class="text-amber-400">apague manualmente</strong> quaisquer blocos intermediários que apresentem posicionamento incorreto ou sobreposição.
+                                </li>
+                                <li id="ta-step5" class="content-section scroll-mt-36">↕️ <strong class="text-lg">Ajuste de Altura (Blocos Inteiros):</strong><br>
+                                    Execute o comando <code class="fira-code">ABS</code>, selecione o primeiro bloco do muro e defina a altura de meio bloco. O comando ajustará automaticamente os blocos seguintes com a alternância de altura necessária.
+                                </li>
+                                <li id="ta-step6" class="content-section scroll-mt-36">🚮 <strong class="text-lg">Remoção Intercalada (Meio Blocos):</strong><br>
+                                    Selecione um <strong class="text-sky-400">meio bloco</strong> (o primeiro da sequência) e execute o comando <code class="fira-code">DELBLOCINV</code> (Apagar Blocos Intercalados Inverso). Isso removerá os meio blocos que não são necessários na sequência alternada.
+                                </li>
+                                <li id="ta-step7" class="content-section scroll-mt-36">🏗️ <strong class="text-lg">Criação do Muro até a Linha de Topo:</strong><br>
+                                    Selecione todos os <strong class="text-sky-400">blocos inteiros</strong> e execute o comando <code class="fira-code">CBE</code> (Criar Blocos Empilhados). Isso irá gerar as cópias verticais dos blocos até atingir a linha de topo da contenção.
+                                </li>
+                                <li id="ta-step8" class="content-section scroll-mt-36">📤 <strong class="text-lg">Extração de Dados para o Revit:</strong><br>
+                                    Finalmente, execute o comando <code class="fira-code">EXDBLK</code> (Exportar Dados Blocos) para gerar o arquivo <code>.txt</code> com as coordenadas (X,Y,Z) e ângulos para importação no Revit.
+                                </li>
+                            </ol>
+                        </div>
+                    </section>
+                </div>
+            </main>
+        </div>
+    </div>
+    
+    <footer class="bg-gray-900 border-t border-gray-700/50 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 text-center text-gray-400">
+            <p>© 2024 - LSP Contenções | Desenvolvido por ian junji</p>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const mainTabLinks = document.querySelectorAll('.main-tab-link');
+            const tabContents = document.querySelectorAll('.tab-content');
+            const sidebarNavs = document.querySelectorAll('.sidebar-nav');
+            const allContentSections = document.querySelectorAll('.content-section');
+
+            // --- Gerenciamento de Tabs e Sidebars ---
+            function switchTab(tabName) {
+                // Ativa a aba principal no header
+                mainTabLinks.forEach(link => {
+                    link.classList.toggle('active-main-tab', link.dataset.tab === tabName);
+                });
+
+                // Mostra o conteúdo principal correspondente
+                tabContents.forEach(content => {
+                    content.classList.toggle('active-tab', content.id === `${tabName}-tab-content`);
+                });
+                
+                // Mostra a barra de navegação lateral correspondente
+                sidebarNavs.forEach(nav => {
+                    nav.classList.toggle('active-sidebar', nav.id === `sidebar-${tabName}`);
+                });
+
+                // Reseta o active do sidebar ao trocar de aba
+                sidebarNavs.forEach(nav => {
+                    nav.querySelectorAll('.sidebar-link').forEach(link => link.classList.remove('active'));
+                });
+
+                // Se houver links na nova aba, ativa o primeiro
+                const firstLinkInNewSidebar = document.querySelector(`#sidebar-${tabName} .sidebar-link`);
+                if (firstLinkInNewSidebar) {
+                    firstLinkInNewSidebar.classList.add('active');
+                }
+            }
+
+            mainTabLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const tabName = link.dataset.tab;
+                    switchTab(tabName);
+                    // Rolagem suave para o topo da área de abas (após as seções fixas)
+                    const tabContainer = document.getElementById('tab-container');
+                    if (tabContainer) {
+                        const headerHeight = document.querySelector('header').offsetHeight;
+                        const scrollTarget = tabContainer.offsetTop - headerHeight - 20; // Ajuste para margem superior
+                        window.scrollTo({ top: scrollTarget, behavior: 'smooth' });
+                    }
+                });
+            });
+            
+            // Estado inicial: ativa a primeira aba
+            switchTab('comandos');
+
+
+            // --- Intersection Observer para highlight dinâmico do sidebar ---
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    const id = entry.target.getAttribute('id');
+                    // Verifica se a seção está visível E se a aba à qual ela pertence está ativa
+                    const parentTabContent = entry.target.closest('.tab-content');
+                    const isActiveTab = parentTabContent && parentTabContent.classList.contains('active-tab');
+
+                    // Se a seção é 'organizacao' ou 'requisitos_especificos'
+                    const isStaticSection = entry.target.id === 'organizacao'; // Agora só 'organizacao' é estática visível
+
+                    // A barra lateral só é atualizada se a seção for estática ou se pertencer à aba ativa
+                    if (entry.isIntersecting && (isStaticSection || isActiveTab)) {
+                        const activeSidebar = document.querySelector('.sidebar-nav.active-sidebar');
+                        if (activeSidebar) {
+                            const linkToActivate = activeSidebar.querySelector(`.sidebar-link[href="#${id}"]`);
+                            if (linkToActivate) {
+                                // Remove 'active' de todos os links do sidebar ativo
+                                activeSidebar.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+                                // Adiciona 'active' ao link correto
+                                linkToActivate.classList.add('active');
+                            }
+                        }
+                    } else if (!entry.isIntersecting && isStaticSection && !isActiveTab) {
+                        // Caso especial para remover o active da seção estática se nenhuma aba estiver ativa
+                        // (o que não deve acontecer com o setup atual, mas por segurança)
+                        const linkToDeactivate = document.querySelector(`.sidebar-link[href="#${id}"]`);
+                        if (linkToDeactivate) {
+                            linkToDeactivate.classList.remove('active');
+                        }
+                    }
+                });
+            }, { rootMargin: '-35% 0px -60% 0px' }); // Ajusta a área de ativação
+
+            allContentSections.forEach(section => observer.observe(section));
+
+            // --- Lógica de cópia ---
+            const copyButtons = document.querySelectorAll('.copy-btn');
+            copyButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const textToCopy = button.getAttribute('data-text');
+                    navigator.clipboard.writeText(textToCopy).then(() => {
+                        showCopiedFeedback(button);
+                    }).catch(err => console.error('Falha ao copiar:', err));
+                });
+            });
+
+            function showCopiedFeedback(button) {
+                const parent = button.parentElement;
+                button.style.display = 'none';
+                const feedback = document.createElement('div');
+                feedback.textContent = 'Copiado!';
+                feedback.className = 'copied-feedback';
+                parent.appendChild(feedback);
+                setTimeout(() => {
+                    parent.removeChild(feedback);
+                    button.style.display = 'block';
+                }, 1500);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+{
+  "Uuid": "f584b6ad-9ed7-437e-98d3-97ec4d1f8c61",
+  "IsCustomNode": false,
+  "Description": "",
+  "Name": "teste_familia",
+  "ElementResolver": {
+    "ResolutionMap": {}
+  },
+  "Inputs": [],
+  "Outputs": [],
+  "Nodes": [
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# Importações Corretas e Seguras\r\nimport clr\r\nclr.AddReference(\"ProtoGeometry\")\r\nimport Autodesk.DesignScript.Geometry as DS # Apelido para Geometria do Dynamo\r\n\r\nclr.AddReference('RevitAPI')\r\nimport Autodesk.Revit.DB as DB # Apelido para API do Revit\r\n\r\nclr.AddReference('RevitServices')\r\nimport RevitServices\r\nfrom RevitServices.Persistence import DocumentManager\r\nfrom RevitServices.Transactions import TransactionManager\r\n\r\nimport locale\r\n\r\n# --- PASSO 0: CONFIGURAÇÃO ---\r\ntry:\r\n    locale.setlocale(locale.LC_NUMERIC, 'C')\r\nexcept:\r\n    pass\r\n\r\ndoc = DocumentManager.Instance.CurrentDBDocument\r\nfilepath = IN[0]\r\n\r\n# --- PASSO 1: PRÉ-PROCESSAMENTO E LIMPEZA DOS DADOS (SUA LÓGICA) ---\r\n# Esta é a etapa mais importante, baseada na sua análise.\r\ncleaned_lines = []\r\nraw_lines = []\r\nerror_message = None\r\n\r\ntry:\r\n    with open(filepath, 'r', encoding='utf-8-sig') as f:\r\n        raw_lines = f.readlines()\r\n    \r\n    # Itera sobre o arquivo, pegando 3 linhas e pulando a 4ª\r\n    for i in range(0, len(raw_lines), 4):\r\n        # Garante que temos um grupo completo de 3 para adicionar\r\n        if i + 2 < len(raw_lines):\r\n            cleaned_lines.append(raw_lines[i])\r\n            cleaned_lines.append(raw_lines[i+1])\r\n            cleaned_lines.append(raw_lines[i+2])\r\n\r\n    # --- PASSO 2: LEITURA DOS PONTOS A PARTIR DOS DADOS LIMPOS ---\r\n    points = []\r\n    for line in cleaned_lines:\r\n        line = line.strip()\r\n        if line:\r\n            parts = line.split(',')\r\n            if len(parts) == 3:\r\n                x = float(parts[0])\r\n                y = float(parts[1])\r\n                z = float(parts[2])\r\n                points.append(DS.Point.ByCoordinates(x, y, z))\r\nexcept Exception as e:\r\n    error_message = \"Erro ao ler ou processar o arquivo: \" + str(e)\r\n\r\n\r\n# --- PASSO 3: CONSTRUÇÃO FINAL E ENVIO PARA O REVIT ---\r\nif not error_message:\r\n    if points:\r\n        # Cria a lista de faces triangulares a partir dos pontos limpos\r\n        face_indices_groups = []\r\n        # Os pontos já estão limpos e ordenados. Basta criar os índices.\r\n        for i in range(0, len(points) // 3):\r\n            idx1 = i * 3\r\n            idx2 = i * 3 + 1\r\n            idx3 = i * 3 + 2\r\n            face_indices_groups.append(DS.IndexGroup.ByIndices(idx1, idx2, idx3))\r\n\r\n        if face_indices_groups:\r\n            try:\r\n                # Cria UMA ÚNICA MALHA a partir de todos os pontos e faces\r\n                final_mesh = DS.Mesh.ByPointsFaceIndices(points, face_indices_groups)\r\n                \r\n                if final_mesh:\r\n                    # Converte a malha para o formato do Revit\r\n                    revit_geoms = final_mesh.ToRevitType()\r\n                    \r\n                    TransactionManager.Instance.EnsureInTransaction(doc)\r\n                    \r\n                    # Usa DirectShape, a ferramenta correta para esta geometria\r\n                    catId = DB.ElementId(DB.BuiltInCategory.OST_GenericModel)\r\n                    ds = DB.DirectShape.CreateElement(doc, catId)\r\n                    ds.SetShape(revit_geoms)\r\n                    \r\n                    TransactionManager.Instance.TransactionTaskDone()\r\n                    \r\n                    OUT = \"SUCESSO. Geometria criada usando sua lógica de limpeza de dados.\"\r\n                else:\r\n                    OUT = \"Falha. A malha final não pôde ser criada com os dados limpos.\"\r\n            except Exception as e:\r\n                OUT = \"Erro final ao criar a malha ou enviá-la para o Revit: \" + str(e)\r\n        else:\r\n            OUT = \"FALHA: Nenhuma face válida pôde ser criada a partir dos dados limpos.\"\r\n    else:\r\n        OUT = \"FALHA FINAL: Nenhum ponto foi processado após a limpeza do arquivo.\"\r\nelse:\r\n    OUT = error_message",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "90b937dd14a740afa0a8d9819fb78cf1",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "fe49634856134e7499d40d43bbe83b3e",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "a748b5397d464f85af371c9fb30d0aca",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Watch, CoreNodeModels",
+      "WatchWidth": 200.0,
+      "WatchHeight": 200.0,
+      "Id": "23db704bfb484095b4b5e12d968bd8f0",
+      "NodeType": "ExtensionNode",
+      "Inputs": [
+        {
+          "Id": "36f8ae187fe5490a8fa631115cec051b",
+          "Name": "",
+          "Description": "Node to show output from",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "85c2c6e72aee45f9b90e517827543621",
+          "Name": "",
+          "Description": "Node output",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Visualizes a node's output"
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.Filename, CoreNodeModels",
+      "Id": "6722fa3d5954489880cc5c14e2f9b29f",
+      "NodeType": "ExtensionNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "77a4b88590c14edd90ded735ad0cfdb8",
+          "Name": "",
+          "Description": "File Path",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Allows you to select a file on the system and returns its file path",
+      "HintPath": "C:\\Users\\Geologia\\Favorites\\teste_surface.txt",
+      "InputValue": "..\\..\\..\\..\\Favorites\\teste_surface.txt"
+    }
+  ],
+  "Connectors": [
+    {
+      "Start": "a748b5397d464f85af371c9fb30d0aca",
+      "End": "36f8ae187fe5490a8fa631115cec051b",
+      "Id": "24c0f4ef33074edd82f012d15f985a54",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "77a4b88590c14edd90ded735ad0cfdb8",
+      "End": "fe49634856134e7499d40d43bbe83b3e",
+      "Id": "e4e433254e4842c58b23887d5efef9bd",
+      "IsHidden": "False"
+    }
+  ],
+  "Dependencies": [],
+  "NodeLibraryDependencies": [],
+  "EnableLegacyPolyCurveBehavior": true,
+  "Thumbnail": "",
+  "GraphDocumentationURL": null,
+  "ExtensionWorkspaceData": [
+    {
+      "ExtensionGuid": "28992e1d-abb9-417f-8b1b-05e053bee670",
+      "Name": "Propriedades",
+      "Version": "2.19",
+      "Data": {}
+    },
+    {
+      "ExtensionGuid": "DFBD9CC0-DB40-457A-939E-8C8555555A9D",
+      "Name": "Generative Design",
+      "Version": "6.1",
+      "Data": {}
+    }
+  ],
+  "Author": "",
+  "Linting": {
+    "activeLinter": "None",
+    "activeLinterId": "7b75fb44-43fd-4631-a878-29f4d5d8399a",
+    "warningCount": 0,
+    "errorCount": 0
+  },
+  "Bindings": [],
+  "View": {
+    "Dynamo": {
+      "ScaleFactor": 1.0,
+      "HasRunWithoutCrash": true,
+      "IsVisibleInDynamoLibrary": true,
+      "Version": "3.2.1.5366",
+      "RunType": "Manual",
+      "RunPeriod": "1000"
+    },
+    "Camera": {
+      "Name": "_Background Preview",
+      "EyeX": 56.5522575378418,
+      "EyeY": 30.363740921020508,
+      "EyeZ": 30.02301597595215,
+      "LookX": -51.58207321166992,
+      "LookY": -37.65211486816406,
+      "LookZ": -29.409250259399414,
+      "UpX": -0.4652244746685028,
+      "UpY": 0.8445184230804443,
+      "UpZ": -0.2652451992034912
+    },
+    "ConnectorPins": [],
+    "NodeViews": [
+      {
+        "Id": "90b937dd14a740afa0a8d9819fb78cf1",
+        "Name": "Python Script",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1358.8680871842635,
+        "Y": 482.96357226613964
+      },
+      {
+        "Id": "23db704bfb484095b4b5e12d968bd8f0",
+        "Name": "Watch",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1640.3211539572858,
+        "Y": 463.31630748506973
+      },
+      {
+        "Id": "6722fa3d5954489880cc5c14e2f9b29f",
+        "Name": "File Path",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 925.4882719451377,
+        "Y": 477.9242986924406
+      }
+    ],
+    "Annotations": [],
+    "X": -542.9852685434419,
+    "Y": -89.33119644667619,
+    "Zoom": 0.8378316467424073
+  }
+}

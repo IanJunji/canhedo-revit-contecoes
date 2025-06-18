@@ -1,0 +1,843 @@
+{
+  "Uuid": "6835383b-fb5e-4153-a9ab-7f93dcd7b4fa",
+  "IsCustomNode": false,
+  "Description": "",
+  "Name": "teste_solido_gen",
+  "ElementResolver": {
+    "ResolutionMap": {}
+  },
+  "Inputs": [],
+  "Outputs": [],
+  "Nodes": [
+    {
+      "ConcreteType": "CoreNodeModels.Input.Filename, CoreNodeModels",
+      "Id": "08fd37f21933428c87294adb165347c5",
+      "NodeType": "ExtensionNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "88327e2abd894b02bbb979800bd3977d",
+          "Name": "",
+          "Description": "File Path",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Allows you to select a file on the system and returns its file path",
+      "HintPath": "C:\\Users\\Geologia\\Favorites\\teste_surface.txt",
+      "InputValue": "C:\\Users\\Geologia\\Favorites\\teste_surface.txt"
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# SCRIPT 01: Encontrar Vértices Únicos\r\nimport clr\r\nclr.AddReference('ProtoGeometry')\r\nfrom Autodesk.DesignScript.Geometry import Point\r\nimport sys\r\n\r\n# Pega o caminho do arquivo da primeira entrada\r\nfilepath = IN[0]\r\nfile_content = \"\"\r\n\r\n# Tenta ler o conteúdo do arquivo de texto\r\ntry:\r\n    with open(filepath, 'r') as f:\r\n        file_content = f.read()\r\nexcept Exception as e:\r\n    OUT = \"ERRO AO LER O ARQUIVO: \" + str(e)\r\n    sys.exit()\r\n\r\n# Separa o conteúdo em linhas\r\nlines = file_content.strip().split('\\n')\r\n\r\n# Listas para armazenar os pontos únicos e um mapa para evitar duplicatas\r\nunique_points = []\r\npoint_map = {} # Dicionário para rastrear pontos já adicionados\r\n\r\n# Itera por todas as linhas do arquivo\r\nfor line in lines:\r\n    if line.strip():\r\n        # A coordenada em texto (ex: \"1.0,2.0,3.0\") é a chave de verificação\r\n        line_key = line.strip()\r\n        \r\n        # Se este ponto ainda não foi visto...\r\n        if line_key not in point_map:\r\n            try:\r\n                # ...cria o ponto, adiciona na lista e registra no mapa\r\n                coords = line.split(',')\r\n                pt = Point.ByCoordinates(float(coords[0]), float(coords[1]), float(coords[2]))\r\n                point_map[line_key] = len(unique_points) # Registra o índice do novo ponto\r\n                unique_points.append(pt)\r\n            except:\r\n                # Ignora linhas mal formatadas\r\n                pass\r\n\r\n# A única saída deste script é a lista de pontos únicos\r\nOUT = unique_points",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "cac6907b08e348fca85b5c593c72f0cb",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "293731d8257a436d915067ecbcc4299d",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "edf54b0b942d4cacabd323600102af5b",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# SCRIPT 02: Montar Índices das Faces (VERSÃO FINAL)\r\nimport clr\r\nimport sys\r\n\r\n# Importa o tipo de dado específico que o nó Mesh precisa\r\nfrom Autodesk.DesignScript.Geometry import IndexGroup\r\n\r\n# Pega o caminho do arquivo da primeira entrada\r\nfilepath = IN[0]\r\nfile_content = \"\"\r\n\r\n# Tenta ler o conteúdo do arquivo\r\ntry:\r\n    with open(filepath, 'r') as f:\r\n        file_content = f.read()\r\nexcept Exception as e:\r\n    OUT = \"ERRO AO LER O ARQUIVO: \" + str(e)\r\n    sys.exit()\r\n\r\n# Recria o mapa de pontos para encontrar os índices\r\nlines = file_content.strip().split('\\n')\r\npoint_map = {}\r\ntemp_unique_points_count = 0\r\nfor line in lines:\r\n    if line.strip():\r\n        line_key = line.strip()\r\n        if line_key not in point_map:\r\n            point_map[line_key] = temp_unique_points_count\r\n            temp_unique_points_count += 1\r\n\r\n# Monta os índices das faces\r\nface_indices = []\r\nfor i in range(0, len(lines), 4):\r\n    face_lines = lines[i:i+3]\r\n    current_face_indices = []\r\n    \r\n    if len(face_lines) == 3:\r\n        for line in face_lines:\r\n            if line.strip():\r\n                line_key = line.strip()\r\n                idx = point_map[line_key]\r\n                current_face_indices.append(idx)\r\n        \r\n        if len(current_face_indices) == 3:\r\n            # --- CORREÇÃO FINAL ---\r\n            # O asterisco (*) desempacota a lista em argumentos individuais\r\n            face_indices.append(IndexGroup.ByIndices(*current_face_indices))\r\n\r\n# A saída agora é uma lista de objetos IndexGroup, o tipo de dado correto.\r\nOUT = face_indices",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "3431cf3064c54801b0d1b02c83de3b46",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "140df25b62b547f5b450228d07fd6810",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "5a5d2c01ffe54431a829610379903e57",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.DoubleSlider, CoreNodeModels",
+      "NumberType": "Double",
+      "MaximumValue": 100.0,
+      "MinimumValue": 0.0,
+      "StepValue": 0.1,
+      "Id": "73c038d6ff584a9e8f520202a5bf37bc",
+      "NodeType": "NumberInputNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "2a0904390d254d8a8d6e75a6a0eb69dc",
+          "Name": "",
+          "Description": "Double",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Produces numeric values",
+      "InputValue": 0.3
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# SCRIPT 4: Encontrar Arestas do Perímetro (Arestas Nuas)\r\nimport clr\r\n\r\n# Pega a lista de IndexGroup da entrada\r\nindex_groups = IN[0]\r\n\r\n# Um dicionário para contar quantas vezes cada aresta aparece\r\nedge_counts = {}\r\n\r\n# Itera por cada face (triângulo) da nossa malha\r\nfor group in index_groups:\r\n    indices = [group.A, group.B, group.C]\r\n    \r\n    # Gera as 3 arestas de cada triângulo\r\n    # Usamos min/max para normalizar a aresta (ex: a aresta 5-10 é a mesma que 10-5)\r\n    edges = [\r\n        tuple(sorted((indices[0], indices[1]))),\r\n        tuple(sorted((indices[1], indices[2]))),\r\n        tuple(sorted((indices[2], indices[0])))\r\n    ]\r\n    \r\n    # Conta cada aresta\r\n    for edge in edges:\r\n        edge_counts[edge] = edge_counts.get(edge, 0) + 1\r\n\r\n# Filtra o dicionário para encontrar as arestas que só apareceram 1 vez\r\n# Essas são as arestas do perímetro (as arestas \"nuas\")\r\nnaked_edges = [edge for edge, count in edge_counts.items() if count == 1]\r\n\r\n# A saída é uma lista de pares de índices (ex: [[5,10], [10, 18], ...])\r\nOUT = naked_edges",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "a74fee5e45594b9a84925f56775fbd05",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "c759c30fedfd480bb02b17d95e0d9fd8",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "f9225c623ec14335a2feb28c75072ce8",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# SCRIPT 5 (VERSÃO FINAL): Construir Sólido com Offset por Normais\r\nimport clr\r\n\r\n# Importações necessárias da API do Revit e do Dynamo\r\nclr.AddReference(\"RevitAPI\")\r\nfrom Autodesk.Revit.DB import TessellatedShapeBuilder, TessellatedShapeBuilderTarget, TessellatedShapeBuilderFallback, TessellatedFace, XYZ, DirectShape, ElementId, BuiltInCategory, TessellatedShapeBuilderOutcome\r\nfrom System.Collections.Generic import List\r\n\r\nclr.AddReference(\"RevitServices\")\r\nimport RevitServices\r\nfrom RevitServices.Persistence import DocumentManager\r\nfrom RevitServices.Transactions import TransactionManager\r\n\r\n# --- Pegar os Dados das Entradas ---\r\ndynamo_points = IN[0]\r\nindex_groups = IN[1]\r\nnaked_edges_indices = IN[2]\r\nthickness = IN[3]\r\nvertex_normals_dynamo = IN[4] # <<<<<< NOVA ENTRADA\r\n\r\n# --- Preparação dos Dados ---\r\n# Converte os pontos do Dynamo para o formato XYZ do Revit\r\ntop_points_rvt = [XYZ(pt.X, pt.Y, pt.Z) for pt in dynamo_points]\r\n# Converte os vetores normais do Dynamo para o formato XYZ do Revit\r\nvertex_normals_rvt = [XYZ(v.X, v.Y, v.Z) for v in vertex_normals_dynamo]\r\n\r\n# >>>>>> ESTA É A MUDANÇA PRINCIPAL <<<<<<\r\n# Cria os pontos da base movendo cada ponto do topo ao longo de sua normal\r\nbottom_points_rvt = []\r\nfor i in range(len(top_points_rvt)):\r\n    top_point = top_points_rvt[i]\r\n    normal_vector = vertex_normals_rvt[i]\r\n    # Multiplica o vetor normal (de comprimento 1) pela espessura desejada\r\n    offset_vector = normal_vector.Multiply(thickness)\r\n    # Subtrai o vetor de offset do ponto do topo para encontrar o ponto da base\r\n    bottom_point = top_point.Subtract(offset_vector)\r\n    bottom_points_rvt.append(bottom_point)\r\n\r\n# Pega o documento atual do Revit\r\ndoc = DocumentManager.Instance.CurrentDBDocument\r\n\r\n# --- O RESTO DO CÓDIGO É IDÊNTICO ---\r\n\r\n# Garante que estamos dentro de uma transação do Revit\r\nTransactionManager.Instance.EnsureInTransaction(doc)\r\nbuilder = TessellatedShapeBuilder()\r\nbuilder.OpenConnectedFaceSet(True)\r\n\r\n# 1. Adicionar as Faces do TOPO\r\nfor group in index_groups:\r\n    face_loop = List[XYZ](); face_loop.Add(top_points_rvt[group.A]); face_loop.Add(top_points_rvt[group.B]); face_loop.Add(top_points_rvt[group.C])\r\n    builder.AddFace(TessellatedFace(face_loop, ElementId.InvalidElementId))\r\n\r\n# 2. Adicionar as Faces da BASE\r\nfor group in index_groups:\r\n    face_loop = List[XYZ](); face_loop.Add(bottom_points_rvt[group.A]); face_loop.Add(bottom_points_rvt[group.C]); face_loop.Add(bottom_points_rvt[group.B])\r\n    builder.AddFace(TessellatedFace(face_loop, ElementId.InvalidElementId))\r\n    \r\n# 3. Adicionar as Faces LATERAIS\r\nfor edge in naked_edges_indices:\r\n    idx1, idx2 = edge[0], edge[1]\r\n    face_loop = List[XYZ](); face_loop.Add(top_points_rvt[idx1]); face_loop.Add(top_points_rvt[idx2]); face_loop.Add(bottom_points_rvt[idx2]); face_loop.Add(bottom_points_rvt[idx1])\r\n    builder.AddFace(TessellatedFace(face_loop, ElementId.InvalidElementId))\r\n\r\n# Finaliza a Construção\r\nbuilder.CloseConnectedFaceSet()\r\nbuilder.Target = TessellatedShapeBuilderTarget.Solid\r\nbuilder.Fallback = TessellatedShapeBuilderFallback.Abort\r\nbuilder.Build()\r\nresult = builder.GetBuildResult()\r\n\r\n# Criar o Elemento no Revit\r\nfinal_object = None\r\nif result.Outcome == TessellatedShapeBuilderOutcome.Solid:\r\n    geom_objects = result.GetGeometricalObjects()\r\n    ds = DirectShape.CreateElement(doc, ElementId(BuiltInCategory.OST_GenericModel))\r\n    ds.SetShape(geom_objects)\r\n    final_object = ds\r\nelse:\r\n    final_object = \"Falha ao criar o sólido: \" + str(result.Outcome)\r\n\r\nTransactionManager.Instance.TransactionTaskDone()\r\nOUT = final_object",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "006af1aa3c774483b86eab2d852b1d41",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "1fe0b4cf154f4dd586b9f348d61f2f8b",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "60dac8d7c27241cdb26080f33114fc39",
+          "Name": "IN[1]",
+          "Description": "Input #1",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "8aa6fcfad20a41fbaa571e625e5b76a8",
+          "Name": "IN[2]",
+          "Description": "Input #2",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "b4b0e77b556d4f2f955b64a1e16cb15d",
+          "Name": "IN[3]",
+          "Description": "Input #3",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "5efe2240a0984d389912f7937ed0b3ed",
+          "Name": "IN[4]",
+          "Description": "Input #4",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "41d40d4e7eb94eab90534542645680a9",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# SCRIPT 6: Calcular Normais dos Vértices (VERSÃO CORRIGIDA E ROBUSTA)\r\nimport clr\r\nclr.AddReference(\"RevitAPI\")\r\nfrom Autodesk.Revit.DB import XYZ\r\n\r\n# Pega os dados das entradas\r\ndynamo_points = IN[0]\r\nindex_groups = IN[1]\r\n\r\n# Converte pontos do Dynamo para o formato XYZ do Revit\r\npoints_rvt = [XYZ(pt.X, pt.Y, pt.Z) for pt in dynamo_points]\r\n\r\n# 1. Calcular a normal de cada face (triângulo)\r\nface_normals = []\r\n# Define um vetor de referência \"para cima\"\r\nz_axis = XYZ.BasisZ\r\n\r\nfor group in index_groups:\r\n    p1 = points_rvt[group.A]\r\n    p2 = points_rvt[group.B]\r\n    p3 = points_rvt[group.C]\r\n    v1 = p2.Subtract(p1)\r\n    v2 = p3.Subtract(p1)\r\n    normal = v1.CrossProduct(v2).Normalize()\r\n    \r\n    # >>>>>> ESTA É A CORREÇÃO CRUCIAL <<<<<<\r\n    # Garante que a normal sempre aponte para cima (no eixo Z)\r\n    # Se o ângulo entre a normal e o eixo Z for maior que 90 graus, ela está de cabeça para baixo\r\n    if normal.DotProduct(z_axis) < 0:\r\n        normal = normal.Negate() # Inverte a normal\r\n        \r\n    face_normals.append(normal)\r\n    \r\n# 2. Calcular a normal de cada vértice (o resto do código é o mesmo)\r\nvertex_normals = [XYZ.Zero for _ in points_rvt]\r\nfor i, group in enumerate(index_groups):\r\n    vertex_normals[group.A] = vertex_normals[group.A].Add(face_normals[i])\r\n    vertex_normals[group.B] = vertex_normals[group.B].Add(face_normals[i])\r\n    vertex_normals[group.C] = vertex_normals[group.C].Add(face_normals[i])\r\n\r\n# 3. Finaliza normalizando cada um dos vetores de vértice resultantes\r\nfinal_vertex_normals = [v.Normalize() for v in vertex_normals]\r\n\r\n# A saída é uma lista de vetores normais consistentes\r\nOUT = final_vertex_normals",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "fe56f20a392f44ccbcd65aa94bc27a00",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "cf25889ba7804f2dbaf4184fdcff911c",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "fd7404dfab3744968775f24c85638666",
+          "Name": "IN[1]",
+          "Description": "Input #1",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "6c6322137cff4ac78afdeb4e926a795b",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# SCRIPT 3: Reconstruir Superfícies Limpas\r\nimport clr\r\nclr.AddReference('ProtoGeometry')\r\nfrom Autodesk.DesignScript.Geometry import Surface, PolyCurve\r\n\r\npoints = IN[0]\r\nindex_groups = IN[1]\r\nsurfaces = []\r\nfor group in index_groups:\r\n    idx1, idx2, idx3 = group.A, group.B, group.C\r\n    pt1, pt2, pt3 = points[idx1], points[idx2], points[idx3]\r\n    polycurve = PolyCurve.ByPoints([pt1, pt2, pt3], True)\r\n    surface = Surface.ByPatch(polycurve)\r\n    surfaces.append(surface)\r\nOUT = surfaces",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "c044aea3f0e346f983cd32d344605f19",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "1aa73f6863d3460886ccf69dc36c1d58",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "db8d5f9c86f64d0abf80a5be01d82d0e",
+          "Name": "IN[1]",
+          "Description": "Input #1",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "c62ca7085fa8470a8d4baf5878314cb4",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# SCRIPT 1: Encontrar Vértices Únicos\r\nimport clr\r\nclr.AddReference('ProtoGeometry')\r\nfrom Autodesk.DesignScript.Geometry import Point\r\nimport sys\r\n\r\nfilepath = IN[0]\r\nfile_content = \"\"\r\ntry:\r\n    with open(filepath, 'r') as f:\r\n        file_content = f.read()\r\nexcept Exception as e:\r\n    OUT = \"ERRO AO LER O ARQUIVO: \" + str(e)\r\n    sys.exit()\r\n\r\nlines = file_content.strip().split('\\n')\r\nunique_points = []\r\npoint_map = {}\r\nfor line in lines:\r\n    if line.strip():\r\n        line_key = line.strip()\r\n        if line_key not in point_map:\r\n            try:\r\n                coords = line.split(',')\r\n                pt = Point.ByCoordinates(float(coords[0]), float(coords[1]), float(coords[2]))\r\n                point_map[line_key] = len(unique_points)\r\n                unique_points.append(pt)\r\n            except:\r\n                pass\r\nOUT = unique_points",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "f088b533d4c3402393f0769aa61bc6cd",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "cd47388ca9944295ac85f52c9c360179",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "6397f736aead4ea8b7aee4ae5a8c27cc",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# SCRIPT 2: Montar Índices das Faces\r\nimport clr\r\nimport sys\r\nfrom Autodesk.DesignScript.Geometry import IndexGroup\r\n\r\nfilepath = IN[0]\r\nfile_content = \"\"\r\ntry:\r\n    with open(filepath, 'r') as f:\r\n        file_content = f.read()\r\nexcept Exception as e:\r\n    OUT = \"ERRO AO LER O ARQUIVO: \" + str(e)\r\n    sys.exit()\r\n\r\nlines = file_content.strip().split('\\n')\r\npoint_map = {}\r\ntemp_unique_points_count = 0\r\nfor line in lines:\r\n    if line.strip():\r\n        line_key = line.strip()\r\n        if line_key not in point_map:\r\n            point_map[line_key] = temp_unique_points_count\r\n            temp_unique_points_count += 1\r\n\r\nface_indices = []\r\nfor i in range(0, len(lines), 4):\r\n    face_lines = lines[i:i+3]\r\n    current_face_indices = []\r\n    if len(face_lines) == 3:\r\n        for line in face_lines:\r\n            if line.strip():\r\n                line_key = line.strip()\r\n                idx = point_map[line_key]\r\n                current_face_indices.append(idx)\r\n        if len(current_face_indices) == 3:\r\n            face_indices.append(IndexGroup.ByIndices(*current_face_indices))\r\nOUT = face_indices",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "2533b377152948cb8f3d8c304c300a18",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "86f7689a40014b1e876ba6d8582c0f57",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "1762e5fc3d97426cbbd2aef71ab543fb",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "45704d641dd0407cbfe500a3c1fda3b3",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "84341b9854454687951da14f0becab5b",
+          "Name": "surface",
+          "Description": "Autodesk.DesignScript.Geometry.Surface",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "cb53e6c0d8e34430a6796c835cf9da42",
+          "Name": "thickness",
+          "Description": "Amount to thicken\n\ndouble\nDefault value : 1",
+          "UsingDefaultValue": true,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "c6c649bc2b5841629273cb3d0f3b61d4",
+          "Name": "both_sides",
+          "Description": "True to thicken on both sides, false to thicken on one side\n\nbool\nDefault value : true",
+          "UsingDefaultValue": true,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "ccec4e3f0c63473c883dbd4b01178b57",
+          "Name": "Solid",
+          "Description": "Thickened surface as solid",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "Autodesk.DesignScript.Geometry.Surface.Thicken@double,bool",
+      "Replication": "Auto",
+      "Description": "Thicken Surface into a Solid, extruding in the direction of Surface normals. If both_sides parameter is true, surface is thickened on both sides.\n\nSurface.Thicken (thickness: double = 1, both_sides: bool = true): Solid"
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.DoubleSlider, CoreNodeModels",
+      "NumberType": "Double",
+      "MaximumValue": 100.0,
+      "MinimumValue": 0.0,
+      "StepValue": 0.1,
+      "Id": "a59b4b41c3494b7b9171587931905c20",
+      "NodeType": "NumberInputNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "0ae5c794643f4cb985debc77da08dc63",
+          "Name": "",
+          "Description": "Double",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Produces numeric values",
+      "InputValue": 0.2
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.BoolSelector, CoreNodeModels",
+      "Id": "06f84182060e4e4db514d422af4c235e",
+      "NodeType": "BooleanInputNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "5829be58643543ba91cc745c022de774",
+          "Name": "",
+          "Description": "Boolean",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Enables selection between True and False",
+      "InputValue": false
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "d23541dce9c34d4eb62f964da5a987dd",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "e58a8a398d6f40ccacef8ba211949fda",
+          "Name": "geometry",
+          "Description": "A single piece of geometry\n\nGeometry",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "402e7f440c30414a8ec6a3d13b8f2157",
+          "Name": "ImportInstance",
+          "Description": "ImportInstance",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "Revit.Elements.ImportInstance.ByGeometry@Autodesk.DesignScript.Geometry.Geometry",
+      "Replication": "Auto",
+      "Description": "Import a collection of Geometry (Solid, Curve, Surface, etc) into Revit as an ImportInstance.\n\nImportInstance.ByGeometry (geometry: Geometry): ImportInstance"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "be091ac7c59046a28b043bdfee4a99b4",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "bc5bbca478f2440e9c3250e89cd50f3f",
+          "Name": "geometry",
+          "Description": "A single piece of geometry\n\nGeometry",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "a077b80f97074f06bd26905fe741cfc2",
+          "Name": "ImportInstance",
+          "Description": "ImportInstance",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "Revit.Elements.ImportInstance.ByGeometry@Autodesk.DesignScript.Geometry.Geometry",
+      "Replication": "Auto",
+      "Description": "Import a collection of Geometry (Solid, Curve, Surface, etc) into Revit as an ImportInstance.\n\nImportInstance.ByGeometry (geometry: Geometry): ImportInstance"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "4448c27088db471baee3633a6e440a2e",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "c37fe1a202d44d489f1c26c3831f739f",
+          "Name": "surfaces",
+          "Description": "Surfaces to join into polysurface\n\nSurface[]",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "a67a684996434d049b99eebd505d4788",
+          "Name": "PolySurface",
+          "Description": "PolySurface",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "Autodesk.DesignScript.Geometry.PolySurface.ByJoinedSurfaces@Autodesk.DesignScript.Geometry.Surface[]",
+      "Replication": "Auto",
+      "Description": "Make Polysurface by joining surfaces.\n\nPolySurface.ByJoinedSurfaces (surfaces: Surface[]): PolySurface"
+    }
+  ],
+  "Connectors": [
+    {
+      "Start": "88327e2abd894b02bbb979800bd3977d",
+      "End": "cd47388ca9944295ac85f52c9c360179",
+      "Id": "3c1f67dc16a9481ab48c4b066a8d55f0",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "88327e2abd894b02bbb979800bd3977d",
+      "End": "86f7689a40014b1e876ba6d8582c0f57",
+      "Id": "ee8df77daa0d42699bc0c804b5fa3221",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "c62ca7085fa8470a8d4baf5878314cb4",
+      "End": "84341b9854454687951da14f0becab5b",
+      "Id": "5d5353b590914f4882d4fe18d5af3336",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "c62ca7085fa8470a8d4baf5878314cb4",
+      "End": "c37fe1a202d44d489f1c26c3831f739f",
+      "Id": "e7116a458fcb48c8b8666cef7f251e8e",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "6397f736aead4ea8b7aee4ae5a8c27cc",
+      "End": "1aa73f6863d3460886ccf69dc36c1d58",
+      "Id": "c71c702de48f4aa2998efaba324343b3",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "1762e5fc3d97426cbbd2aef71ab543fb",
+      "End": "db8d5f9c86f64d0abf80a5be01d82d0e",
+      "Id": "2122dc4e0fb24e06a02278e4fae34984",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "0ae5c794643f4cb985debc77da08dc63",
+      "End": "cb53e6c0d8e34430a6796c835cf9da42",
+      "Id": "f35f2dd95dc648ae8a9d6a0e14f6156e",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "5829be58643543ba91cc745c022de774",
+      "End": "c6c649bc2b5841629273cb3d0f3b61d4",
+      "Id": "59c175a2d803489791ef2d593eb9b4ba",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "a67a684996434d049b99eebd505d4788",
+      "End": "bc5bbca478f2440e9c3250e89cd50f3f",
+      "Id": "bce270c6944f4c559f85d6290a95a4aa",
+      "IsHidden": "False"
+    }
+  ],
+  "Dependencies": [],
+  "NodeLibraryDependencies": [
+    {
+      "Name": "teste_surface.txt",
+      "ReferenceType": "External",
+      "Nodes": [
+        "08fd37f21933428c87294adb165347c5"
+      ]
+    }
+  ],
+  "EnableLegacyPolyCurveBehavior": true,
+  "Thumbnail": "",
+  "GraphDocumentationURL": null,
+  "ExtensionWorkspaceData": [
+    {
+      "ExtensionGuid": "28992e1d-abb9-417f-8b1b-05e053bee670",
+      "Name": "Propriedades",
+      "Version": "2.19",
+      "Data": {}
+    },
+    {
+      "ExtensionGuid": "DFBD9CC0-DB40-457A-939E-8C8555555A9D",
+      "Name": "Generative Design",
+      "Version": "6.1",
+      "Data": {}
+    }
+  ],
+  "Author": "",
+  "Linting": {
+    "activeLinter": "None",
+    "activeLinterId": "7b75fb44-43fd-4631-a878-29f4d5d8399a",
+    "warningCount": 0,
+    "errorCount": 0
+  },
+  "Bindings": [
+    {
+      "NodeId": "d23541dc-e9c3-4d4e-b62f-964da5a987dd",
+      "Binding": {
+        "ByGeometry_InClassDecl-1_InFunctionScope-1_Instance0_d23541dc-e9c3-4d4e-b62f-964da5a987dd": "H4sIAAAAAAAACq2arXJcORBG3+XiTJV0JbXUwSHBCzMBrfuTCjHYNXP53VdlOB89zMQfOafGnqP+9bG9Xf+9X+ePeI/t+6+P7fz6Yft4bv+8//v37c/PH8/t+3PzcrTux3jMfdyPah4P93k87trPkadNj3iklGqM3p/bt+f28+3963dLanvPn9vnN2T81PFOjY8i46Ng467jjo3fMu6NGvf2Ol4SBtSnjmNAI8t4xoCGeF4yBjTE87JjQKd4XgoGdIrnpWBAp3heKgb0UM8rBvRQzxsG9FTPDQN6queGAT3V844BvdTzjgG91POBAb3Uc8eA3uq5Y0Bv8bwmCqgn8bwmCqgn8bxmCqgn8bzuFFDP4nndKaCexfNaMKBZPK8FA7qL57ViQHf1vGFAi3reMKBFPTcMaFHPDQNa1fOOAa3q+cCAVvV8YECbeu4Y0KaeOwbUxPOWMKAmnreMATXxvGUMaBfP244B7eL5+q6IjYvn699canyI5+svNDYunq8PF2rc1fOGAXX1vGFAXT03DGio51gp8lDPsVLkoZ5jpcineo6VIp/qOVaK/BDPDStFfojnhpUiP8Rzw0qRn+K5YaXIT/HcsFLkp3huWCnySzw3rBT5JZ4bVor8Vs+xUuS3eo6VIr/Vc6wURVLPsVIUST3HSlEk9RwrRZHVc6wURVbPsVIUu3qOlaLYxfOOlaLYxfOOlaIo4nnHSlEU8bxjpSiKeN6xUhRVPO9YKYoqnnesFEUTzztWiqKp51gpiqaeY6UoTD3HSlGYeo6VojD1HCtF0dVzrBRFV8+xUhRDPcdK0Xqb13EM6BDPB1aKVrWUcawUra/QOo4BdfF8YKVofbjoOAY0xPOBlaKY4vnASlFM8XxgpSimeo6VojjUc6wUxaGeY6UoDvUcK0VxqudYKYpTPcdKUVzqOVaK4lLPsVIUl3i+Hnep8Vs8X4+72Lh4vt5fsXHxfL2/QuMziefriRQbF8/XKyY1nsXz9YqJjYvn66ERG1fPsVI0d/UcK0VzV8+xUjR39RwrRbOo51gpmkU9x0rRrOo5VopmVc+xUjSreo6VotlePbeElaLZXMcxoO3V8/UeggG1V88tYaVo/azjGND+6rklrBRNuT9f4xhQuT+3hJWiKffnlrBSNOX+fI1jQOX+3BJWiqbcn69xDKjcn69HRQyo3J9bwkrRlPvzNY4BlftzS1gpmnJ/vsYxoHJ/bhkrRVPuzy1jpWjK/fkax4DK/bllrBRNuT9f4xhQuT9fL/MYULk/t4yVoin352scAyr355axUjTl/nyNY0Dl/tzyVyn6/fn7f55mm92QNgAA"
+      }
+    },
+    {
+      "NodeId": "be091ac7-c590-46a2-8b04-3bdfee4a99b4",
+      "Binding": {
+        "ByGeometry_InClassDecl-1_InFunctionScope-1_Instance0_be091ac7-c590-46a2-8b04-3bdfee4a99b4": "H4sIAAAAAAAACh3LIQ6AMAwF0Lt8TZPBRlnRGDSSIroRCAZB5sjuTsLzb32xWzGMeBVLea77nCfFqBCf+0FypNTFgwKLkUjKdIRhj23iJGbknAvWMisaxXyX/3rnA3cVdfsAAO+EAl4AAAA="
+      }
+    }
+  ],
+  "View": {
+    "Dynamo": {
+      "ScaleFactor": 1.0,
+      "HasRunWithoutCrash": true,
+      "IsVisibleInDynamoLibrary": true,
+      "Version": "3.2.1.5366",
+      "RunType": "Manual",
+      "RunPeriod": "1000"
+    },
+    "Camera": {
+      "Name": "_Background Preview",
+      "EyeX": 144.73980712890625,
+      "EyeY": 50.885833740234375,
+      "EyeZ": -191.5364990234375,
+      "LookX": -52.044464111328125,
+      "LookY": -65.23590087890625,
+      "LookZ": 63.83958435058594,
+      "UpX": -0.27700275182724,
+      "UpY": 0.8987962603569031,
+      "UpZ": 0.33975714445114136
+    },
+    "ConnectorPins": [],
+    "NodeViews": [
+      {
+        "Id": "08fd37f21933428c87294adb165347c5",
+        "Name": "File Path",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 492.8718423623694,
+        "Y": 422.9790511345144
+      },
+      {
+        "Id": "cac6907b08e348fca85b5c593c72f0cb",
+        "Name": "Lista pontos unicos",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 2326.2922463498617,
+        "Y": 1312.9685076849155
+      },
+      {
+        "Id": "3431cf3064c54801b0d1b02c83de3b46",
+        "Name": "Lista indices de cada face",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 2318.1789866025815,
+        "Y": 1441.0061443098487
+      },
+      {
+        "Id": "73c038d6ff584a9e8f520202a5bf37bc",
+        "Name": "Number Slider",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 2715.248638985426,
+        "Y": 1369.259332901952
+      },
+      {
+        "Id": "a74fee5e45594b9a84925f56775fbd05",
+        "Name": "Encontrar Perímetro",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 3140.54084682029,
+        "Y": 1267.9340251826902
+      },
+      {
+        "Id": "006af1aa3c774483b86eab2d852b1d41",
+        "Name": "final",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 3806.968112196538,
+        "Y": 1198.5726566771232
+      },
+      {
+        "Id": "fe56f20a392f44ccbcd65aa94bc27a00",
+        "Name": "Calcular Normais dos Vértices",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 3231.2348532701935,
+        "Y": 1465.0240600372606
+      },
+      {
+        "Id": "c044aea3f0e346f983cd32d344605f19",
+        "Name": "Reconstruir Superfícies",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1270.724714845978,
+        "Y": 371.9608008067863
+      },
+      {
+        "Id": "f088b533d4c3402393f0769aa61bc6cd",
+        "Name": "Vertices",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 982.9275705227013,
+        "Y": 307.20772160527775
+      },
+      {
+        "Id": "2533b377152948cb8f3d8c304c300a18",
+        "Name": "Indices",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 989.3740826967557,
+        "Y": 488.9993649136126
+      },
+      {
+        "Id": "45704d641dd0407cbfe500a3c1fda3b3",
+        "Name": "Surface.Thicken",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1661.100651233228,
+        "Y": 374.2514482154437
+      },
+      {
+        "Id": "a59b4b41c3494b7b9171587931905c20",
+        "Name": "Number Slider",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 851.4187221719908,
+        "Y": 642.4263546561081
+      },
+      {
+        "Id": "06f84182060e4e4db514d422af4c235e",
+        "Name": "Boolean",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1276.8885256595838,
+        "Y": 730.0989202232486
+      },
+      {
+        "Id": "d23541dce9c34d4eb62f964da5a987dd",
+        "Name": "ImportInstance.ByGeometry",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 2020.8160305454653,
+        "Y": 374.25144821544376
+      },
+      {
+        "Id": "be091ac7c59046a28b043bdfee4a99b4",
+        "Name": "ImportInstance.ByGeometry",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 2078.309903495839,
+        "Y": -70.53851967850258
+      },
+      {
+        "Id": "4448c27088db471baee3633a6e440a2e",
+        "Name": "PolySurface.ByJoinedSurfaces",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1647.8148093159239,
+        "Y": 107.17911163218952
+      }
+    ],
+    "Annotations": [],
+    "X": -187.6958300153242,
+    "Y": 181.40676191134713,
+    "Zoom": 0.6018210898393669
+  }
+}
