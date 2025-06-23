@@ -452,7 +452,8 @@
                       lista_pontos_lidos p_temp i p_orig_A p_orig_B p_medio_calc 
                       lista_segmentos_para_blocos layer_alvo_nome vla_layer_alvo 
                       angulo_insercao old_clayer contador_blocos_inseridos mspace doc 
-                      tolerancia_dist vla_bloco_inserido_raw segmento
+                      tolerancia_dist vla_bloco_inserido_raw segmento 
+                      first_block_vla_obj
                      ) 
   (defun *error* (msg) 
     (IAN:std-error 
@@ -466,6 +467,7 @@
     )
   )
 
+  (setq first_block_vla_obj nil)
   (setq layer_alvo_nome "BLOCOS_PONTOS_MEDIOS")
   (setq contador_blocos_inseridos 0)
   (setq lista_pontos_lidos nil)
@@ -576,6 +578,9 @@
     (if (not (vl-catch-all-error-p vla_bloco_inserido_raw)) 
       (progn 
         (setq contador_blocos_inseridos (1+ contador_blocos_inseridos))
+        (if (not first_block_vla_obj) 
+          (setq first_block_vla_obj vla_bloco_inserido_raw)
+        )
         (if vla_layer_alvo (vla-put-Layer vla_bloco_inserido_raw layer_alvo_nome))
         (princ ".")
       )
@@ -599,7 +604,7 @@
                 "' inserido(s)."
         )
       )
-      T
+      first_block_vla_obj
     )
     (progn (princ "\nNenhum bloco foi inserido.") nil)
   )
@@ -783,197 +788,124 @@
 ;;;            orientação do bloco.                                        ;;;
 ;;;-----------------------------------------------------------------------------
 
-(defun c:RotacionarGeogrelhas (/ 
-                               ;; Variáveis locais
-                               *error* s:old_cmdecho s:old_osmode ; Variáveis de sistema
-                               offset_distance ss_blocks total_selected i ent_name 
-                               vla_block current_insertion_point_vla 
-                               current_insertion_point_list current_rotation_rad 
-                               new_block_rotation_rad offset_angle_rad new_ins_x 
-                               new_ins_y new_ins_z new_insertion_point_list 
-                               processed_count error_obj
-                              ) 
 
-  ;; --- Manipulador de Erro Local Simples ---
-  (defun *error* (msg) 
-    (setq *error* nil) ; Previne recursão
-    (princ "\n\n!!!!!!!! [RTOB v1.0 *error*] !!!!!!!!")
-    (princ (strcat "\n  ERRO: " msg))
-    (if s:old_cmdecho (setvar "CMDECHO" s:old_cmdecho))
-    (if s:old_osmode (setvar "OSMODE" s:old_osmode))
-    (princ "\n  Comando RTOB interrompido.")
-    (princ "\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n")
-    (princ)
-  )
 
-  ;; --- Inicialização ---
-  (princ "\n>>> RTOB v1.0 - Rotacionar e Deslocar Blocos <<<")
-  (vl-load-com) ; Garante que COM está carregado
-  (setq s:old_cmdecho (getvar "CMDECHO"))
-  (setvar "CMDECHO" 0)
-  (setq s:old_osmode (getvar "OSMODE"))
-  (setvar "OSMODE" 0)
+;;; --- Função "Motor" para RTGG: A lógica pura, sem interação ---
+(defun IAN:rtgg-core (ss_blocks offset_distance / total_selected i ent_name vla_block 
+                      current_insertion_point_vla current_insertion_point_list 
+                      current_rotation_rad new_block_rotation_rad offset_angle_rad 
+                      new_ins_x new_ins_y new_ins_z new_insertion_point_list 
+                      processed_count error_obj
+                     ) 
   (setq processed_count 0)
-
-  ;; 1. Pedir Comprimento do Offset
-  (initget 1) ; Não pode ser nulo
-  (setq offset_distance (getdist "\nDigite a distância para o deslocamento perpendicular (ex: 8.0): "))
-  (if (null offset_distance) 
-    (progn (princ "\nDistância não fornecida. Comando cancelado.") 
-           (*error* "Cancelado pelo usuário")
-           (exit)
-    )
-  )
-
-  ;; 2. Selecionar Blocos
-  (princ "\nSelecione os blocos para processar:")
-  (setq ss_blocks (ssget '((0 . "INSERT"))))
-
-  (if (null ss_blocks) 
-    (progn (princ "\nNenhum bloco selecionado.") 
-           (*error* "Seleção cancelada")
-           (exit)
-    )
-  )
-
   (setq total_selected (sslength ss_blocks))
   (princ 
-    (strcat "\n" (itoa total_selected) " bloco(s) selecionado(s). Processando...")
+    (strcat "\nProcessando " 
+            (itoa total_selected)
+            " bloco(s) com offset de "
+            (rtos offset_distance)
+            "..."
+    )
   )
 
-  ;; 3. Para Cada Bloco Selecionado
   (setq i 0)
   (while (< i total_selected) 
     (setq ent_name (ssname ss_blocks i))
     (setq vla_block (vl-catch-all-apply 'vlax-ename->vla-object (list ent_name)))
 
-    (if (vl-catch-all-error-p vla_block) 
-      (princ 
-        (strcat "\n  AVISO: Falha ao obter objeto VLA para " 
-                (vl-princ-to-string ent_name)
-                ". Erro: "
-                (vl-catch-all-error-message vla_block)
-        )
-      )
+    (if (not (vl-catch-all-error-p vla_block)) 
       (progn 
         (setq vla_block vla_block) ; Dereference
-        (princ 
-          (strcat "\n  Processando Bloco (Handle: " 
-                  (if (vlax-property-available-p vla_block 'Handle) 
-                    (vla-get-Handle vla_block)
-                    "N/A"
-                  )
-                  ")..."
-          )
+        (setq current_insertion_point_vla (vla-get-InsertionPoint vla_block))
+        (setq current_rotation_rad (vla-get-Rotation vla_block))
+        (setq current_insertion_point_list (vlax-safearray->list (vlax-variant-value current_insertion_point_vla)))
+
+        ;; Rotacionar
+        (setq new_block_rotation_rad (+ current_rotation_rad PI))
+        (vla-put-Rotation vla_block new_block_rotation_rad)
+
+        ;; Calcular novo ponto
+        (setq offset_angle_rad (- new_block_rotation_rad (/ PI 2.0)))
+        (setq new_ins_x (+ (car current_insertion_point_list) 
+                           (* offset_distance (cos offset_angle_rad))
+                        )
         )
-
-        ;; Obter Ponto de Inserção Atual
-        (setq current_insertion_point_vla (vl-catch-all-apply 'vla-get-InsertionPoint 
-                                                              (list vla_block)
-                                          )
+        (setq new_ins_y (+ (cadr current_insertion_point_list) 
+                           (* offset_distance (sin offset_angle_rad))
+                        )
         )
-        (setq current_rotation_rad (vl-catch-all-apply 'vla-get-Rotation 
-                                                       (list vla_block)
-                                   )
-        )
+        (setq new_ins_z (caddr current_insertion_point_list))
+        (setq new_insertion_point_list (list new_ins_x new_ins_y new_ins_z))
 
-        (if 
-          (or (vl-catch-all-error-p current_insertion_point_vla) 
-              (vl-catch-all-error-p current_rotation_rad)
-          )
-          (princ (strcat "\n    AVISO: Falha ao obter Ponto de Inserção ou Rotação."))
-          (progn 
-            (setq current_insertion_point_list (vlax-safearray->list 
-                                                 (vlax-variant-value current_insertion_point_vla)
-                                               )
-            )
-            (setq current_rotation_rad current_rotation_rad) ; Já é o valor
-
-            ;; Rotacionar o Bloco em 180 graus em torno do ponto de inserção
-            (setq new_block_rotation_rad (+ current_rotation_rad PI))
-            (setq error_obj (vl-catch-all-apply 'vla-put-Rotation 
-                                                (list vla_block 
-                                                      new_block_rotation_rad
-                                                )
-                            )
-            )
-
-            (if (vl-catch-all-error-p error_obj) 
-              (princ 
-                (strcat "\n    ERRO: Falha ao aplicar rotação de 180 graus: " 
-                        (vl-catch-all-error-message error_obj)
-                )
-              )
-              (progn 
-                (princ 
-                  (strcat "\n    Bloco rotacionado para " 
-                          (angtos new_block_rotation_rad 0 4)
-                          " graus."
-                  )
-                )
-
-                ;; Calcular o ângulo para o deslocamento (90 graus da nova direção do bloco)
-                (setq offset_angle_rad (- new_block_rotation_rad (/ PI 2.0))) ; PI/2 = 90 graus
-
-                ;; Calcular o novo ponto de inserção
-                (setq new_ins_x (+ (car current_insertion_point_list) 
-                                   (* offset_distance (cos offset_angle_rad))
-                                )
-                )
-                (setq new_ins_y (+ (cadr current_insertion_point_list) 
-                                   (* offset_distance (sin offset_angle_rad))
-                                )
-                )
-                (setq new_ins_z (caddr current_insertion_point_list)) ; Mantém o Z original
-                (setq new_insertion_point_list (list new_ins_x new_ins_y new_ins_z))
-
-                ;; Mover o Bloco (atualizar seu ponto de inserção)
-                (setq error_obj (vl-catch-all-apply 'vla-put-InsertionPoint 
-                                                    (list vla_block 
-                                                          (vlax-3d-point new_insertion_point_list)
-                                                    )
-                                )
-                )
-
-                (if (vl-catch-all-error-p error_obj) 
-                  (princ 
-                    (strcat "\n    ERRO: Falha ao mover o bloco para o novo ponto: " 
-                            (vl-catch-all-error-message error_obj)
-                    )
-                  )
-                  (progn 
-                    (princ 
-                      (strcat "\n    Bloco movido para: " 
-                              (vl-princ-to-string new_insertion_point_list)
-                      )
-                    )
-                    (setq processed_count (1+ processed_count))
-                  )
-                )
-              )
-            )
-          )
+        ;; Mover
+        (vla-put-InsertionPoint vla_block (vlax-3d-point new_insertion_point_list))
+        (setq processed_count (1+ processed_count))
+      )
+      (princ 
+        (strcat "\n  AVISO: Falha ao obter objeto VLA. Erro: " 
+                (vl-catch-all-error-message vla_block)
         )
       )
     )
     (setq i (1+ i))
   )
+  processed_count ; Retorna o número de blocos processados
+)
 
-  ;; --- Feedback Final ---
+(defun c:RotacionarGeogrelhas (/ *error* s:old_cmdecho s:old_osmode offset_distance 
+                               ss_blocks processed_count
+                              ) 
+  ;; --- Manipulador de Erro Local ---
+  (defun *error* (msg) 
+    (IAN:std-error 
+      msg
+      (function 
+        (lambda () 
+          (if s:old_cmdecho (setvar "CMDECHO" s:old_cmdecho))
+          (IAN:restore-osnap s:old_osmode)
+        )
+      )
+    )
+  )
+
+  ;; --- Inicialização ---
+  (princ "\n>>> RTGG - Rotacionar e Deslocar Blocos <<<")
+  (setq s:old_cmdecho (getvar "CMDECHO"))
+  (setvar "CMDECHO" 0)
+  (setq s:old_osmode (getvar "OSMODE"))
+  (setvar "OSMODE" 0)
+
+  ;; 1. Pedir Parâmetros ao Usuário
+  (initget 1) ; Não pode ser nulo
+  (setq offset_distance (getdist "\nDigite a distância para o deslocamento perpendicular (ex: 8.0): "))
+  (if (null offset_distance) 
+    (progn (princ "\nDistância não fornecida. Comando cancelado.") (exit))
+  )
+
+  (princ "\nSelecione os blocos para processar:")
+  (setq ss_blocks (ssget '((0 . "INSERT"))))
+  (if (null ss_blocks) 
+    (progn (princ "\nNenhum bloco selecionado. Comando cancelado.") (exit))
+  )
+
+  ;; 2. Chamar o Motor com os Dados Coletados
+  (setq processed_count (IAN:rtgg-core ss_blocks offset_distance))
+
+  ;; 3. Feedback Final
   (princ "\n-----------------------------------------------------")
   (if (> processed_count 0) 
     (princ 
       (strcat "\nSucesso! " 
               (itoa processed_count)
               " de "
-              (itoa total_selected)
+              (itoa (sslength ss_blocks))
               " bloco(s) foram processados."
       )
     )
     (princ 
       (strcat "\nNenhum bloco foi processado com sucesso de " 
-              (itoa total_selected)
-              " selecionado(s). Verifique os avisos."
+              (itoa (sslength ss_blocks))
+              " selecionado(s)."
       )
     )
   )
@@ -981,14 +913,11 @@
 
   ;; --- Limpeza Final ---
   (if s:old_cmdecho (setvar "CMDECHO" s:old_cmdecho))
-  (if s:old_osmode (setvar "OSMODE" s:old_osmode))
-  (princ "\nComando RTOB v1.0 concluído.")
+  (IAN:restore-osnap s:old_osmode)
   (princ)
 )
-
 ;; Alias para o comando
 (defun c:RTGG () (c:RotacionarGeogrelhas))
-(princ)
 
 
 ;;;; ----------------------------------------------------------------------;;;;
@@ -1036,11 +965,9 @@
       (foreach bloco_a_mover blocos_deslocados 
         (setq pt_atual_bloco (IAN:abs-get-insertion-point-list bloco_a_mover))
         (setq rot_bloco (vla-get-Rotation bloco_a_mover))
-        (setq angulo_direcao_offset_h (if (eq direcao_escada_str "Subir") 
-                                        (+ rot_bloco (/ PI 2.0))
-                                        (- rot_bloco (/ PI 2.0))
-                                      )
-        )
+
+        (setq angulo_direcao_offset_h (+ rot_bloco (/ PI 2.0)))
+
         (setq offset_vetor_unit_x (cos angulo_direcao_offset_h))
         (setq offset_vetor_unit_y (sin angulo_direcao_offset_h))
         (setq novo_ponto_movido (list 
@@ -1071,7 +998,6 @@
   )
 
   ;; --- Parte 2: Unificar todas as bases e criar novas camadas ---
-  ;; *** LÓGICA CORRIGIDA AQUI ***
   (setq lista_unificada (append blocos_na_base blocos_deslocados))
 
   (if lista_unificada 
@@ -1187,7 +1113,7 @@
 
   (foreach bloco_a_classificar lista_blocos 
     (setq pt_insercao (vlax-get-property bloco_a_classificar 'InsertionPoint))
-    (setq circulo_temp (vla-AddCircle mspace pt_insercao 0.01))
+    (setq circulo_temp (vla-AddCircle mspace pt_insercao 0.4))
     (setq intersec_encontrada nil)
 
     ;; Otimização: para de procurar assim que encontra a primeira interseção
@@ -1551,31 +1477,33 @@
 ;; Ordena blocos por proximidade a partir de um bloco inicial
 (defun IAN:abs-sort-blocks-by-proximity (first_block_vla candidate_blocks_vla 
                                          block_point_map / ordered_list 
-                                         current_block_obj rem candidates pt curpt 
-                                         next min_dist candpt dist
+                                         current_block_obj blocos_restantes candidates 
+                                         pt curpt next min_dist candpt dist
                                         ) 
   (setq ordered_list nil)
   (setq current_block_obj first_block_vla)
-  (setq rem (append candidate_blocks_vla nil))
+  (setq blocos_restantes (append candidate_blocks_vla nil))
   (while current_block_obj 
     (setq ordered_list (cons current_block_obj ordered_list))
-    (setq rem (vl-remove-if 
-                (function 
-                  (lambda (blk) 
-                    (equal (vla-get-Handle blk) (vla-get-Handle current_block_obj))
-                  )
-                )
-                rem
-              )
+    (setq blocos_restantes (vl-remove-if 
+                             (function 
+                               (lambda (blk) 
+                                 (equal (vla-get-Handle blk) 
+                                        (vla-get-Handle current_block_obj)
+                                 )
+                               )
+                             )
+                             blocos_restantes
+                           )
     )
-    (if rem 
+    (if blocos_restantes 
       (progn 
         (setq curpt (cdr (assoc (vla-get-Handle current_block_obj) block_point_map)))
         (setq next     nil
               min_dist nil
         )
         (if curpt 
-          (foreach cand rem 
+          (foreach cand blocos_restantes 
             (setq candpt (cdr (assoc (vla-get-Handle cand) block_point_map)))
             (if candpt 
               (progn 
@@ -1595,99 +1523,27 @@
   (if ordered_list (reverse ordered_list) nil)
 )
 
-;; Comando: altera altura Z de blocos em sequência (um sim, um não)
-(defun c:ALTBLOCOSEQ (/ *error* old_cmdecho old_osmode first_block_ename 
-                      first_block_vla first_block_name height_offset 
-                      all_instances_of_block ordered_block_sequence block_vla_in_loop 
-                      current_insertion_pt_list new_insertion_pt_list 
-                      vla_operation_error_obj modified_block_count point_map
-                     ) 
-  (defun *error* (msg) 
-    (IAN:std-error 
-      msg
-      (function 
-        (lambda () 
-          (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-          (IAN:restore-osnap old_osmode)
-        )
-      )
-    )
-  )
-  (setq old_cmdecho (getvar "CMDECHO"))
-  (setvar "CMDECHO" 0)
-  (setq old_osmode (IAN:disable-osnap))
+
+
+;;; --- Função "Motor" para ALTBLOCOSEQ: A lógica pura, sem interação ---
+(defun IAN:abs-core (first_block_vla height_offset / first_block_name 
+                     all_instances_of_block point_map ordered_block_sequence 
+                     block_vla_in_loop current_insertion_pt_list new_insertion_pt_list 
+                     vla_operation_error_obj modified_block_count idx next_index 
+                     last_displaced z_anterior dois_vezes_offset tol z_atual delta 
+                     deltaA quoc divisivel?
+                    ) 
   (setq modified_block_count 0)
-  (princ "\n>>> ALTERAR ALTURA DE BLOCOS EM SEQUÊNCIA (ALTBLOCOSEQ) <<<")
-  ;; Seleciona bloco inicial
-  (setq first_block_vla nil)
-  (while (not first_block_vla) 
-    (setq first_block_ename (car (entsel "\nSelecione o PRIMEIRO bloco da sequência: ")))
-    (cond 
-      ((null first_block_ename)
-       (princ "\nSeleção cancelada. Comando encerrado.")
-       (setvar "CMDECHO" old_cmdecho)
-       (IAN:restore-osnap old_osmode)
-       (exit)
-      )
-      ((setq vla_operation_error_obj (vl-catch-all-apply 'vlax-ename->vla-object 
-                                                         (list first_block_ename)
-                                     )
-       )
-       (if (vl-catch-all-error-p vla_operation_error_obj) 
-         (princ 
-           (strcat "\n[ABS ERRO] Falha ao obter objeto VLA: " 
-                   (vl-catch-all-error-message vla_operation_error_obj)
-           )
-         )
-         (progn 
-           (setq first_block_vla vla_operation_error_obj)
-           (if 
-             (not 
-               (and (vlax-property-available-p first_block_vla 'ObjectName) 
-                    (= (vla-get-ObjectName first_block_vla) "AcDbBlockReference")
-               )
-             )
-             (progn (princ "\nA entidade selecionada não é um bloco. Tente novamente.") 
-                    (setq first_block_vla nil)
-             )
-             (setq first_block_name (vla-get-EffectiveName first_block_vla))
-           )
-         )
-       )
-      )
-    )
-  )
-  (princ 
-    (strcat "\nBloco inicial selecionado: '" 
-            first_block_name
-            "' (Handle: "
-            (vla-get-Handle first_block_vla)
-            ")"
-    )
-  )
-  ;; Altura de deslocamento
-  (setq height_offset (getreal "\nDigite a altura de deslocamento Z para blocos alternados (ex: 0.5): "))
-  (if (or (null height_offset) (equal height_offset 0.0 1e-8)) 
-    (progn 
-      (princ "\nAltura de deslocamento inválida ou zero. Comando cancelado.")
-      (setvar "CMDECHO" old_cmdecho)
-      (IAN:restore-osnap old_osmode)
-      (exit)
-    )
-  )
+  (setq first_block_name (vla-get-EffectiveName first_block_vla))
+
   ;; Coleta instâncias e ordena
   (setq all_instances_of_block (IAN:abs-get-block-instances first_block_name))
-  (if (or (null all_instances_of_block) (< (length all_instances_of_block) 1)) 
+  (if (< (length all_instances_of_block) 1) 
     (progn 
       (princ 
-        (strcat "\nNenhuma instância adicional do bloco '" 
-                first_block_name
-                "' encontrada."
-        )
+        (strcat "\nNenhuma instância do bloco '" first_block_name "' encontrada.")
       )
-      (setvar "CMDECHO" old_cmdecho)
-      (IAN:restore-osnap old_osmode)
-      (exit)
+      (return 0)
     )
   )
   (princ 
@@ -1707,12 +1563,10 @@
                                  point_map
                                )
   )
-  (if (or (null ordered_block_sequence) (< (length ordered_block_sequence) 2)) 
-    (progn 
-      (princ "\nNão foi possível ordenar uma sequência de pelo menos 2 blocos.")
-      (setvar "CMDECHO" old_cmdecho)
-      (IAN:restore-osnap old_osmode)
-      (exit)
+
+  (if (< (length ordered_block_sequence) 2) 
+    (progn (princ "\nNão foi possível ordenar uma sequência de pelo menos 2 blocos.") 
+           (return 0)
     )
   )
   (princ 
@@ -1724,13 +1578,15 @@
 
   ;; Aplica altura intercalada
   (princ "\nAplicando altura intercalada...")
-  (setq idx               0
-        next_index        0
-        last_displaced    nil
-        z_anterior        nil
-        dois_vezes_offset (* 2 height_offset)
+  (setq idx            0
+        next_index     0
+        last_displaced nil
+        z_anterior     nil
+  )
+  (setq dois_vezes_offset (* 2.0 height_offset)
         tol               1e-8
   )
+
   (foreach block_vla_in_loop ordered_block_sequence 
     (setq current_insertion_pt_list (cdr 
                                       (assoc (vla-get-Handle block_vla_in_loop) 
@@ -1743,10 +1599,11 @@
         (setq z_atual (caddr current_insertion_pt_list))
         (if (and z_anterior (not (equal z_atual z_anterior tol))) 
           (progn 
-            (setq delta (- z_atual z_anterior))
-            (setq deltaA (abs delta))
-            (setq quoc (/ deltaA dois_vezes_offset))
-            (setq divisivel? (equal (- quoc (fix quoc)) 0.0 tol))
+            (setq delta      (- z_atual z_anterior)
+                  deltaA     (abs delta)
+                  quoc       (/ deltaA dois_vezes_offset)
+                  divisivel? (equal (- quoc (fix quoc)) 0.0 tol)
+            )
             (cond 
               ((and divisivel? last_displaced) (setq next_index 0))
               ((and divisivel? (not last_displaced)) (setq next_index 1))
@@ -1787,15 +1644,95 @@
     )
     (setq idx (1+ idx))
   )
-  (if (> modified_block_count 0) 
+  ordered_block_sequence ; Retorna a lista de VLA objects da sequência ordenada
+)
+
+;; Comando: altera altura Z de blocos em sequência (um sim, um não)
+(defun c:ALTBLOCOSEQ (/ *error* old_cmdecho old_osmode first_block_ename 
+                      first_block_vla vla_operation_error_obj height_offset 
+                      modified_block_count
+                     ) 
+  (defun *error* (msg) 
+    (IAN:std-error 
+      msg
+      (function 
+        (lambda () 
+          (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+          (IAN:restore-osnap old_osmode)
+        )
+      )
+    )
+  )
+
+  (setq old_cmdecho (getvar "CMDECHO"))
+  (setvar "CMDECHO" 0)
+  (setq old_osmode (IAN:disable-osnap))
+
+  (princ "\n>>> ALTERAR ALTURA DE BLOCOS EM SEQUÊNCIA (ALTBLOCOSEQ) <<<")
+
+  ;; Etapa 1: Selecionar o bloco inicial
+  (setq first_block_vla nil)
+  (while (not first_block_vla) 
+    (setq first_block_ename (car (entsel "\nSelecione o PRIMEIRO bloco da sequência: ")))
+    (cond 
+      ((null first_block_ename)
+       (princ "\nSeleção cancelada.")
+       (exit)
+      )
+      ((vl-catch-all-error-p 
+         (setq vla_operation_error_obj (vl-catch-all-apply 'vlax-ename->vla-object 
+                                                           (list first_block_ename)
+                                       )
+         )
+       )
+       (princ 
+         (strcat "\n[ABS ERRO] Falha ao obter objeto VLA: " 
+                 (vl-catch-all-error-message vla_operation_error_obj)
+         )
+       )
+      )
+      ((not 
+         (and 
+           (vlax-property-available-p (setq first_block_vla vla_operation_error_obj) 
+                                      'ObjectName
+           )
+           (= (vla-get-ObjectName first_block_vla) "AcDbBlockReference")
+         )
+       )
+       (princ "\nA entidade selecionada não é um bloco. Tente novamente.")
+       (setq first_block_vla nil)
+      )
+    )
+  )
+  (princ 
+    (strcat "\nBloco inicial selecionado: '" 
+            (vla-get-EffectiveName first_block_vla)
+            "'."
+    )
+  )
+
+  ;; Etapa 2: Obter altura do usuário
+  (setq height_offset (getreal "\nDigite a altura de deslocamento Z para blocos alternados (ex: 0.5): "))
+  (if (or (null height_offset) (equal height_offset 0.0 1e-8)) 
+    (progn (princ "\nAltura de deslocamento inválida ou zero. Comando cancelado.") 
+           (exit)
+    )
+  )
+
+  ;; Etapa 3: Chamar o motor com os dados coletados
+  (setq lista_blocos_modificados (IAN:abs-core first_block_vla height_offset))
+
+  ;; Etapa 4: Feedback Final
+  (if (and lista_blocos_modificados (> (length lista_blocos_modificados) 0)) 
     (princ 
       (strcat "\nSucesso! " 
-              (itoa modified_block_count)
-              " bloco(s) tiveram a altura modificada."
+              (itoa (length lista_blocos_modificados))
+              " blocos na sequência processados."
       )
     )
     (princ "\nNenhum bloco teve a altura modificada.")
   )
+
   (setvar "CMDECHO" old_cmdecho)
   (IAN:restore-osnap old_osmode)
   (princ)
@@ -1816,21 +1753,130 @@
 ;;;            mais próximo.                                               ;;;
 ;;;-----------------------------------------------------------------------------
 
+
+
+;;; --- Função "Motor" para DELBLOCINV: A lógica pura, sem interação ---
+(defun IAN:delblocinv-core (first_block_vla height_offset / first_block_name 
+                            all_instances_of_block point_map ordered_block_sequence 
+                            deleted_block_count idx next_index last_deleted z_anterior 
+                            dois_vezes_offset tol block_vla_in_loop current_pt z_atual 
+                            delta divisivel? vla_operation_error_obj
+                           ) 
+  (setq deleted_block_count 0)
+  (setq first_block_name (vla-get-EffectiveName first_block_vla))
+
+  ;; Coleta instâncias e ordena
+  (setq all_instances_of_block (IAN:abs-get-block-instances first_block_name))
+  (if (< (length all_instances_of_block) 1) 
+    (progn 
+      (princ 
+        (strcat "\nNenhuma instância do bloco '" first_block_name "' encontrada.")
+      )
+      (return 0)
+    )
+  )
+  (princ 
+    (strcat "\nEncontradas " 
+            (itoa (length all_instances_of_block))
+            " instâncias totais."
+    )
+  )
+
+  (setq point_map (IAN:abs-build-point-map all_instances_of_block))
+  (princ "\nOrdenando blocos por proximidade...")
+  (setq ordered_block_sequence (IAN:abs-sort-blocks-by-proximity 
+                                 first_block_vla
+                                 all_instances_of_block
+                                 point_map
+                               )
+  )
+
+  (if (null ordered_block_sequence) 
+    (progn (princ "\nNão foi possível ordenar a sequência de blocos.") (return 0))
+  )
+  (princ 
+    (strcat "\n" 
+            (itoa (length ordered_block_sequence))
+            " blocos ordenados na sequência."
+    )
+  )
+
+  ;; Remoção intercalada adaptativa
+  (princ "\nRemovendo blocos com lógica adaptativa...")
+  (setq idx          0
+        next_index   0
+        last_deleted nil
+        z_anterior   nil
+  )
+  (setq dois_vezes_offset (* 2.0 height_offset)
+        tol               1e-8
+  )
+
+  (foreach block_vla_in_loop ordered_block_sequence 
+    (setq current_pt (cdr (assoc (vla-get-Handle block_vla_in_loop) point_map)))
+    (if current_pt 
+      (progn 
+        (setq z_atual (caddr current_pt))
+        (if (and z_anterior (not (equal z_atual z_anterior tol))) 
+          (progn 
+            (setq delta      (- z_atual z_anterior)
+                  divisivel? (equal 
+                               (- (/ (abs delta) dois_vezes_offset) 
+                                  (fix (/ (abs delta) dois_vezes_offset))
+                               )
+                               0.0
+                               tol
+                             )
+            )
+            (cond 
+              ((and divisivel? last_deleted) (setq next_index 1))
+              ((and divisivel? (not last_deleted)) (setq next_index 0))
+              ((and (not divisivel?) last_deleted) (setq next_index 0))
+              ((and (not divisivel?) (not last_deleted)) (setq next_index 1))
+            )
+          )
+        )
+        (if (= next_index 0) 
+          (progn 
+            (setq vla_operation_error_obj (vl-catch-all-apply 'vla-Delete 
+                                                              (list block_vla_in_loop)
+                                          )
+            )
+            (if (not (vl-catch-all-error-p vla_operation_error_obj)) 
+              (setq deleted_block_count (1+ deleted_block_count))
+              (princ 
+                (strcat "\n  [AVISO] Falha ao apagar bloco: " 
+                        (vl-catch-all-error-message vla_operation_error_obj)
+                )
+              )
+            )
+            (setq last_deleted T)
+          )
+          (setq last_deleted nil)
+        )
+        (setq next_index (- 1 next_index))
+        (setq z_anterior z_atual)
+      )
+      (princ 
+        (strcat "\n  [AVISO] Falha ao obter ponto do bloco (Handle: " 
+                (vla-get-Handle block_vla_in_loop)
+                ")."
+        )
+      )
+    )
+    (setq idx (1+ idx))
+  )
+  deleted_block_count ; Retorna o número de blocos apagados
+)
+
 ;;;
 ;;; c:APAGAR_BLOCOS_INTERCALADOS_INVERSO (DELBLOCINV)
 ;;;
-(defun c:APAGAR_BLOCOS_INTERCALADOS_INVERSO (/ *error* ; Manipulador de erro local
-                                             old_cmdecho old_osmode ; Para restaurar CMDECHO e OSMODE
+(defun c:APAGAR_BLOCOS_INTERCALADOS_INVERSO (/ *error* old_cmdecho old_osmode 
                                              first_block_ename first_block_vla 
-                                             first_block_name ; Bloco inicial
-                                             all_instances_of_block ; Lista de todos os blocos com o mesmo nome
-                                             ordered_block_sequence ; Blocos ordenados por proximidade
-                                             block_vla_in_loop index ; Para iteração
-                                             vla_operation_error_obj ; Para capturar erros de operações VLA
-                                             deleted_block_count ; Contador
-                                             point_map ; Cache de pontos de inserção
+                                             vla_operation_error_obj height_offset 
+                                             deleted_block_count
                                             ) 
-
   ;; --- Manipulador de Erro Local ---
   (defun *error* (msg) 
     (IAN:std-error 
@@ -1846,9 +1892,8 @@
 
   ;; --- Inicialização ---
   (setq old_cmdecho (getvar "CMDECHO"))
-  (setvar "CMDECHO" 0) ; Suprime eco de comandos
+  (setvar "CMDECHO" 0)
   (setq old_osmode (IAN:disable-osnap))
-  (setq deleted_block_count 0)
 
   (princ "\n>>> APAGAR BLOCOS INTERCALADOS EM SEQUÊNCIA (ORDEM INVERSA) <<<")
 
@@ -1858,200 +1903,56 @@
     (setq first_block_ename (car (entsel "\nSelecione o PRIMEIRO bloco da sequência para iniciar a remoção: ")))
     (cond 
       ((null first_block_ename)
-       (princ "\nSeleção cancelada. Comando encerrado.")
-       (setvar "CMDECHO" old_cmdecho)
-       (IAN:restore-osnap old_osmode)
+       (princ "\nSeleção cancelada.")
        (exit)
       )
-      ((setq vla_operation_error_obj (vl-catch-all-apply 'vlax-ename->vla-object 
-                                                         (list first_block_ename)
-                                     )
-       )
-       (if (vl-catch-all-error-p vla_operation_error_obj) 
-         (princ 
-           (strcat "\n[DELBLOCINV ERRO] Falha ao obter objeto VLA: " 
-                   (vl-catch-all-error-message vla_operation_error_obj)
-           )
-         )
-         (progn 
-           (setq first_block_vla vla_operation_error_obj)
-           (if 
-             (not 
-               (and (vlax-property-available-p first_block_vla 'ObjectName) 
-                    (= (vla-get-ObjectName first_block_vla) "AcDbBlockReference")
-               )
-             )
-             (progn 
-               (princ "\nA entidade selecionada não é um bloco. Tente novamente.")
-               (setq first_block_vla nil)
-             )
-             (setq first_block_name (vla-get-EffectiveName first_block_vla))
-           )
+      ((vl-catch-all-error-p 
+         (setq vla_operation_error_obj (vl-catch-all-apply 'vlax-ename->vla-object 
+                                                           (list first_block_ename)
+                                       )
          )
        )
+       (princ 
+         (strcat "\n[ERRO] Falha ao obter objeto VLA: " 
+                 (vl-catch-all-error-message vla_operation_error_obj)
+         )
+       )
+      )
+      ((not 
+         (and 
+           (vlax-property-available-p (setq first_block_vla vla_operation_error_obj) 
+                                      'ObjectName
+           )
+           (= (vla-get-ObjectName first_block_vla) "AcDbBlockReference")
+         )
+       )
+       (princ "\nA entidade selecionada não é um bloco. Tente novamente.")
+       (setq first_block_vla nil)
       )
     )
   )
   (princ 
     (strcat "\nBloco inicial selecionado: '" 
-            first_block_name
-            "' (Handle: "
-            (vla-get-Handle first_block_vla)
-            ")"
-    )
-  )
-
-  ;; --- Etapa 2: Coletar Todas as Instâncias do Mesmo Bloco ---
-  ;; Reutiliza a função auxiliar IAN:abs-get-block-instances
-  (setq all_instances_of_block (IAN:abs-get-block-instances first_block_name))
-  (if (or (null all_instances_of_block) (< (length all_instances_of_block) 1)) 
-    (progn 
-      (princ 
-        (strcat "\nNenhuma instância adicional do bloco '" 
-                first_block_name
-                "' encontrada (ou apenas a selecionada)."
-        )
-      )
-      (setvar "CMDECHO" old_cmdecho)
-      (IAN:restore-osnap old_osmode)
-      (exit)
-    )
-  )
-  (princ 
-    (strcat "\nEncontradas " 
-            (itoa (length all_instances_of_block))
-            " instâncias totais do bloco '"
-            first_block_name
+            (vla-get-EffectiveName first_block_vla)
             "'."
     )
   )
 
-  ;; Gera mapa de pontos para evitar leituras repetidas
-  (setq point_map (IAN:abs-build-point-map all_instances_of_block))
-
-  ;; --- Etapa 3: Ordenar Blocos por Proximidade ---
-  ;; Reutiliza a função auxiliar IAN:abs-sort-blocks-by-proximity
-  (princ "\nOrdenando blocos por proximidade...")
-  (setq ordered_block_sequence (IAN:abs-sort-blocks-by-proximity 
-                                 first_block_vla
-                                 all_instances_of_block
-                                 point_map
-                               )
-  )
-
-  (if (null ordered_block_sequence)  ; Não precisa verificar < 2 aqui, pois até 1 bloco pode ser apagado se for o primeiro.
-    (progn 
-      (princ "\nNão foi possível ordenar a sequência de blocos. Verifique os blocos.")
-      (setvar "CMDECHO" old_cmdecho)
-      (IAN:restore-osnap old_osmode)
-      (exit)
-    )
-  )
-  (princ 
-    (strcat "\n" 
-            (itoa (length ordered_block_sequence))
-            " blocos ordenados na sequência."
-    )
-  )
-
-  ;; --- (NOVO) pedir altura de referência igual à da ABS ---
-  (setq height_offset (getreal "\nInforme o mesmo deslocamento Z usado na ABS (ex: 0.5): "))
+  ;; --- Etapa 2: Obter Altura de Referência ---
+  (setq height_offset (getreal "\nInforme o mesmo deslocamento Z usado na criação (ex: 0.75): "))
   (if (or (null height_offset) (<= (abs height_offset) 1e-8)) 
-    (progn 
-      (princ "\nValor inválido. Comando cancelado.")
-      (setvar "CMDECHO" old_cmdecho)
-      (IAN:restore-osnap old_osmode)
-      (exit)
-    )
+    (progn (princ "\nValor inválido. Comando cancelado.") (exit))
   )
 
-  ;; --- Etapa 4: Remoção intercalada adaptativa -----------------
-  (princ "\nRemovendo blocos com lógica adaptativa...")
+  ;; --- Etapa 3: Chamar o Motor ---
+  (setq deleted_block_count (IAN:delblocinv-core first_block_vla height_offset))
 
-  (setq idx 0) ;; índice global
-  (setq next_index 0) ;; 0 = apaga, 1 = mantém
-  (setq last_deleted nil) ;; T se o bloco anterior foi apagado
-  (setq z_anterior nil)
-  (setq dois_vezes_offset (* 2 height_offset))
-  (setq tol 1e-8)
-
-  (foreach block_vla_in_loop ordered_block_sequence 
-    (setq current_pt (cdr (assoc (vla-get-Handle block_vla_in_loop) point_map)))
-
-    (if current_pt 
-      (progn 
-        (setq z_atual (caddr current_pt))
-
-        ;; --- Mudança de nível? ---------------------------------
-        (if (and z_anterior (not (equal z_atual z_anterior tol))) 
-          (progn 
-            (setq delta (- z_atual z_anterior))
-            (setq divisivel? (equal 
-                               (- (/ (abs delta) dois_vezes_offset) 
-                                  (fix (/ (abs delta) dois_vezes_offset))
-                               )
-                               0.0
-                               tol
-                             )
-            )
-
-            ;; -------- aplica as 4 regras --------
-            (cond 
-              ((and divisivel? last_deleted) (setq next_index 1)) ; começa em 1 (mantém)
-              ((and divisivel? (not last_deleted)) (setq next_index 0)) ; começa em 0 (apaga)
-              ((and (not divisivel?) last_deleted) (setq next_index 0)) ; começa em 0 (apaga)
-              ((and (not divisivel?) (not last_deleted)) (setq next_index 1)) ; começa em 1 (mantém)
-            )
-          )
-        )
-
-        ;; --- Apaga ou não de acordo com next_index -------------
-        (if (= next_index 0) 
-          (progn 
-            (setq vla_operation_error_obj (vl-catch-all-apply 'vla-Delete 
-                                                              (list block_vla_in_loop)
-                                          )
-            )
-            (if (vl-catch-all-error-p vla_operation_error_obj) 
-              (princ 
-                (strcat "\n  [DELBLOCINV AVISO] Falha ao apagar bloco (Handle: " 
-                        (vla-get-Handle block_vla_in_loop)
-                        "): "
-                        (vl-catch-all-error-message vla_operation_error_obj)
-                )
-              )
-              (setq deleted_block_count (1+ deleted_block_count))
-            )
-            (setq last_deleted T)
-          )
-          (setq last_deleted nil)
-        )
-
-        ;; --- Alterna para o próximo bloco ----------------------
-        (setq next_index (- 1 next_index)) ; 0?1
-        (setq z_anterior z_atual)
-      )
-      (princ 
-        (strcat "\n  [DELBLOCINV AVISO] Falha ao obter ponto (Handle: " 
-                (vla-get-Handle block_vla_in_loop)
-                ")."
-        )
-      )
-    )
-    (setq idx (1+ idx))
-  )
-
-  ;; --- Etapa 5: Feedback Final ---
+  ;; --- Etapa 4: Feedback Final ---
   (if (> deleted_block_count 0) 
     (princ 
-      (strcat "\nSucesso! " 
-              (itoa deleted_block_count)
-              " bloco(s) '"
-              first_block_name
-              "' foram apagados."
-      )
+      (strcat "\nSucesso! " (itoa deleted_block_count) " bloco(s) foram apagados.")
     )
-    (princ "\nNenhum bloco foi apagado (verifique a sequência).")
+    (princ "\nNenhum bloco foi apagado (verifique a sequência e a altura).")
   )
 
   ;; --- Finalização ---
@@ -2437,6 +2338,7 @@
   )
   (princ)
 )
+(defun c:CT () (c:CONTENCOES)) ; Alias curto
 
 
 ;;; ------------------------------------------------------------------------
@@ -2446,8 +2348,7 @@
 ;; --- Lógica para construir um Muro Terramesh ---
 (defun c:CONSTRUIR_MURO_TERRAMESH (/ ss_base_terramesh caminho_arquivo 
                                    nome_bloco_terramesh ent_sel_data vla_bloco_modelo 
-                                   ss_entidades_subir ss_entidades_descer offset_h 
-                                   z_final
+                                   ss_entidades_subir ss_entidades_descer z_final
                                   ) 
   (princ "\n>>> INICIANDO CONSTRUCAO DE MURO TERRAMESH <<<")
 
@@ -2501,12 +2402,10 @@
 
               (if ss_entidades_subir 
                 (progn 
-                  (setq offset_h (getdist "\nDigite o offset horizontal para a subida: "))
                   (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
-
-                  (if (and offset_h z_final) 
-                    (IAN:cbe-core ss_entidades_subir "Subir" offset_h 1.0 z_final)
-                    (princ "\nParâmetros para subida incompletos. Etapa pulada.")
+                  (if z_final 
+                    (IAN:cbe-core ss_entidades_subir "Subir" 0.1 1.0 z_final)
+                    (princ "\nZ Final não informado. Etapa pulada.")
                   )
                 )
                 (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
@@ -2521,12 +2420,10 @@
 
               (if ss_entidades_descer 
                 (progn 
-                  (setq offset_h (getdist "\nDigite o offset horizontal para a descida: "))
                   (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
-
-                  (if (and offset_h z_final) 
-                    (IAN:cbe-core ss_entidades_descer "Descer" offset_h 1.0 z_final)
-                    (princ "\nParâmetros para descida incompletos. Etapa pulada.")
+                  (if z_final 
+                    (IAN:cbe-core ss_entidades_descer "Descer" 0.1 1.0 z_final)
+                    (princ "\nZ Final não informado. Etapa pulada.")
                   )
                 )
                 (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
@@ -2544,20 +2441,384 @@
   (princ)
 )
 
-(defun c:CONSTRUIR_MURO_TERRA_ARMADA (/) 
-  (princ "\n(Lógica de construção para Terra Armada vai aqui...)")
+;; --- Lógica para construir um Muro Terra Armada ---
+(defun c:CONSTRUIR_MURO_TERRA_ARMADA (/ *error* old_osmode old_cmdecho ss_base_ta 
+                                      caminho_arquivo nome_bloco_inteiro ent_sel_data 
+                                      vla_bloco_modelo first_block_created 
+                                      all_base_blocks_vla z_final nome_bloco_meio
+                                     ) 
+  ;; --- Manipulador de Erro Local ---
+  (defun *error* (msg) 
+    (IAN:std-error 
+      msg
+      (function 
+        (lambda () 
+          (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+          (IAN:restore-osnap old_osmode)
+        )
+      )
+    )
+  )
+
+  ;; --- Inicialização ---
+  (setq old_cmdecho (getvar "CMDECHO"))
+  (setvar "CMDECHO" 0)
+  (setq old_osmode (IAN:disable-osnap))
+
+  (princ "\n>>> INICIANDO CONSTRUCAO DE MURO TERRA ARMADA <<<")
+
+  ;; =================================================================
+  ;; --- FASE 1: BLOCO INTEIRO ---
+  ;; =================================================================
+  (princ "\n\n--- FASE 1: Construção com Bloco Inteiro ---")
+
+  ;; --- Etapa 1.1: Gerar Pontos (GPR) ---
+  (princ "\nSelecione a linha de base para o muro:")
+  (setq ss_base_ta (ssget '((0 . "LINE,LWPOLYLINE"))))
+  (if (not ss_base_ta) 
+    (progn (princ "\nLinha de base não selecionada. Comando cancelado.") (exit))
+  )
+
+  (setq caminho_arquivo (strcat (getvar "DWGPREFIX") "terra_armada_pontos.txt"))
+  (princ (strcat "\nArquivo de pontos será salvo em: " caminho_arquivo))
+
+  (if (not (IAN:gerar-pontos-regua-core ss_base_ta 1.5 caminho_arquivo)) 
+    (progn (princ "\nFalha ao gerar pontos para o Terra Armada. Comando cancelado.") 
+           (exit)
+    )
+  )
+  (princ "\nPontos do eixo gerados com sucesso.")
+
+  ;; --- Etapa 1.2: Colocar Blocos (CBPM) ---
+  (setq nome_bloco_inteiro nil)
+  (while (not nome_bloco_inteiro) 
+    (setq ent_sel_data (entsel "\nSelecione o bloco modelo INTEIRO: "))
+    (if ent_sel_data 
+      (if 
+        (= "AcDbBlockReference" 
+           (vla-get-ObjectName (setq vla_bloco_modelo (vlax-ename->vla-object (car ent_sel_data))))
+        )
+        (setq nome_bloco_inteiro (vla-get-EffectiveName vla_bloco_modelo))
+        (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
+      )
+      (progn (princ "\nSeleção de bloco cancelada.") (exit))
+    )
+  )
+  (setq first_block_created (IAN:cbpm-core caminho_arquivo nome_bloco_inteiro))
+  (princ "\n\n--- Primeira fiada de blocos inteiros criada. ---")
+
+  ;; --- Etapa 1.3: Alternar Altura (ABS-Core) ---
+  (if (not first_block_created) 
+    (progn (princ "\nNenhum bloco foi criado na etapa anterior. Cancelando.") 
+           (exit)
+    )
+  )
+  (setq all_base_blocks_vla (IAN:abs-core first_block_created 0.75))
+  (princ "\n\n--- Altura da primeira fiada alternada automaticamente. ---")
+
+  ;; --- Etapa 1.4: Criar Camadas Verticais (CBE-Core) ---
+  (if (not all_base_blocks_vla) 
+    (progn (princ "\nNenhum bloco foi processado na etapa anterior. Cancelando.") 
+           (exit)
+    )
+  )
+
+  (princ "\nMontando seleção para construção vertical automaticamente...")
+
+  ;; Cria um novo "carrinho de compras" (selection set) vazio
+  (setq ss_entidades_cbe (ssadd))
+
+  ;; Adiciona a linha de base original que o usuário selecionou no começo
+  (ssadd (ssname ss_base_ta 0) ss_entidades_cbe)
+
+  ;; Passa por cada bloco da lista que guardamos e adiciona no carrinho
+  (foreach blk all_base_blocks_vla 
+    (ssadd (vlax-vla-object->ename blk) ss_entidades_cbe)
+  )
+
+  (setq z_final (getreal "\nDigite a coordenada Z FINAL desejada para o muro: "))
+  (if (not z_final) 
+    (progn (princ "\nZ Final não informado. Comando cancelado.") (exit))
+  )
+
+  ;; Chama o CBE com a seleção que montamos sozinhos
+  (IAN:cbe-core ss_entidades_cbe "Subir" 0.0 0.75 z_final)
+  (princ "\n\n--- Construção vertical dos blocos inteiros concluída. ---")
+
+  ;; =================================================================
+  ;; --- FASE 2: MEIO BLOCO ---
+  ;; =================================================================
+  (princ "\n\n--- FASE 2: Inserção do Meio Bloco ---")
+
+  ;; --- Etapa 2.1: Colocar Meios Blocos (CBPM) ---
+  (setq nome_bloco_meio nil)
+  (while (not nome_bloco_meio) 
+    (setq ent_sel_data (entsel "\nSelecione o bloco modelo MEIO BLOCO: "))
+    (if ent_sel_data 
+      (if 
+        (= "AcDbBlockReference" 
+           (vla-get-ObjectName (setq vla_bloco_modelo (vlax-ename->vla-object (car ent_sel_data))))
+        )
+        (setq nome_bloco_meio (vla-get-EffectiveName vla_bloco_modelo))
+        (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
+      )
+      (progn (princ "\nSeleção de bloco cancelada.") (exit))
+    )
+  )
+  (setq first_block_created (IAN:cbpm-core caminho_arquivo nome_bloco_meio))
+  (princ "\n\n--- Fiada de meios blocos criada. ---")
+
+  ;; --- Etapa 2.2: Apagar Meios Blocos Intercalados (DELBLOCINV-Core) ---
+  (if (not first_block_created) 
+    (progn (princ "\nNenhum meio bloco foi criado na etapa anterior. Cancelando.") 
+           (exit)
+    )
+  )
+
+  (IAN:delblocinv-core first_block_created 0.75)
+  (princ "\n\n--- Meios blocos intercalados apagados automaticamente. ---")
+
+  ;; --- Finalização ---
+  (princ "\n\n>>> Construção de Muro Terra Armada concluída! <<<")
+  (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
   (princ)
 )
 
-(defun c:CONSTRUIR_MURO_LOCKNLOAD (/) 
-  (princ "\n(Lógica de construção para Lock & Load vai aqui...)")
+;; --- Lógica para construir um Muro Lock & Load ---
+(defun c:CONSTRUIR_MURO_LOCKNLOAD (/ *error* old_osmode old_cmdecho ss_base_lnl 
+                                   caminho_arquivo nome_bloco_lnl ent_sel_data 
+                                   vla_bloco_modelo first_block_created 
+                                   ss_entidades_subir ss_entidades_descer z_final
+                                  ) 
+  ;; --- Manipulador de Erro Local ---
+  (defun *error* (msg) 
+    (IAN:std-error 
+      msg
+      (function 
+        (lambda () 
+          (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+          (IAN:restore-osnap old_osmode)
+        )
+      )
+    )
+  )
+
+  ;; --- Inicialização ---
+  (setq old_cmdecho (getvar "CMDECHO"))
+  (setvar "CMDECHO" 0)
+  (setq old_osmode (IAN:disable-osnap))
+
+  (princ "\n>>> INICIANDO CONSTRUCAO DE MURO LOCK & LOAD <<<")
+
+  ;; --- Etapa 1: Gerar Pontos (GPR) com régua de 0.4 ---
+  (princ "\nSelecione a linha de base para o muro:")
+  (setq ss_base_lnl (ssget '((0 . "LINE,LWPOLYLINE"))))
+  (if (not ss_base_lnl) 
+    (progn (princ "\nLinha de base não selecionada. Comando cancelado.") (exit))
+  )
+
+  (setq caminho_arquivo (strcat (getvar "DWGPREFIX") "locknload_pontos.txt"))
+  (princ (strcat "\nArquivo de pontos será salvo em: " caminho_arquivo))
+
+  (if (not (IAN:gerar-pontos-regua-core ss_base_lnl 0.4 caminho_arquivo)) 
+    (progn (princ "\nFalha ao gerar pontos para o Lock & Load. Comando cancelado.") 
+           (exit)
+    )
+  )
+  (princ "\nPontos do eixo gerados com sucesso.")
+
+  ;; --- Etapa 2: Colocar Blocos (CBPM) ---
+  (setq nome_bloco_lnl nil)
+  (while (not nome_bloco_lnl) 
+    (setq ent_sel_data (entsel "\nSelecione o bloco modelo LOCK & LOAD: "))
+    (if ent_sel_data 
+      (if 
+        (= "AcDbBlockReference" 
+           (vla-get-ObjectName (setq vla_bloco_modelo (vlax-ename->vla-object (car ent_sel_data))))
+        )
+        (setq nome_bloco_lnl (vla-get-EffectiveName vla_bloco_modelo))
+        (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
+      )
+      (progn (princ "\nSeleção de bloco cancelada.") (exit))
+    )
+  )
+  (setq first_block_created (IAN:cbpm-core caminho_arquivo nome_bloco_lnl))
+  (princ "\n\n--- Primeira fiada de blocos Lock & Load criada. ---")
+
+  ;; --- Etapa 3: Alternar Altura (ABS-Core) com altura de 0.4 ---
+  (if (not first_block_created) 
+    (progn (princ "\nNenhum bloco foi criado na etapa anterior. Cancelando.") 
+           (exit)
+    )
+  )
+  (setq lista_blocos_processados (IAN:abs-core first_block_created 0.4))
+  (if (not lista_blocos_processados) 
+    (progn (princ "\nFalha ao processar a sequência de blocos para alternar a altura. Cancelando.") 
+           (exit)
+    )
+  )
+  (princ "\n\n--- Altura da primeira fiada alternada automaticamente. ---")
+
+  ;; =================================================================
+  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CBE) com altura e offset de 0.4 ---
+  ;; =================================================================
+
+  ;; --- Etapa de Subida ---
+  (princ "\n\n--- Etapa de Subida ---")
+  (princ "\nSelecione os blocos e linhas de apoio para SUBIR (ou pressione ENTER para pular):")
+  (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+  (if ss_entidades_subir 
+    (progn 
+      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
+      (if z_final 
+        (IAN:cbe-core ss_entidades_subir "Subir" 0.04 0.4 z_final)
+        (princ "\nZ Final não informado. Etapa pulada.")
+      )
+    )
+    (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
+  )
+
+  ;; --- Etapa de Descida ---
+  (princ "\n\n--- Etapa de Descida ---")
+  (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
+  (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+  (if ss_entidades_descer 
+    (progn 
+      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
+      (if z_final 
+        (IAN:cbe-core ss_entidades_descer "Descer" 0.04 0.4 z_final)
+        (princ "\nZ Final não informado. Etapa pulada.")
+      )
+    )
+    (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+  )
+
+  ;; --- Finalização ---
+  (princ "\n\n>>> Construção de Muro Lock & Load concluída! <<<")
+  (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
   (princ)
 )
 
-(defun c:CONSTRUIR_MURO_GEOGRELHA (/) 
-  (princ "\n(Lógica de construção para Geogrelha vai aqui...)")
+;; --- Lógica para construir um Muro de Geogrelha ---
+(defun c:CONSTRUIR_MURO_GEOGRELHA (/ *error* old_osmode old_cmdecho ss_base_gg 
+                                   caminho_arquivo nome_bloco_gg ent_sel_data 
+                                   vla_bloco_modelo ss_geogrelhas_para_inverter 
+                                   ss_entidades_subir ss_entidades_descer z_final
+                                  ) 
+  ;; --- Manipulador de Erro Local ---
+  (defun *error* (msg) 
+    (IAN:std-error 
+      msg
+      (function 
+        (lambda () 
+          (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+          (IAN:restore-osnap old_osmode)
+        )
+      )
+    )
+  )
+
+  ;; --- Inicialização ---
+  (setq old_cmdecho (getvar "CMDECHO"))
+  (setvar "CMDECHO" 0)
+  (setq old_osmode (IAN:disable-osnap))
+
+  (princ "\n>>> INICIANDO CONSTRUCAO DE MURO DE GEOGRELHA <<<")
+
+  ;; --- Etapa 1: Gerar Pontos (GPR) ---
+  (princ "\nSelecione a linha de base para o muro:")
+  (setq ss_base_gg (ssget '((0 . "LINE,LWPOLYLINE"))))
+  (if (not ss_base_gg) 
+    (progn (princ "\nLinha de base não selecionada. Comando cancelado.") (exit))
+  )
+
+  (setq caminho_arquivo (strcat (getvar "DWGPREFIX") "geogrelha_pontos.txt"))
+  (princ (strcat "\nArquivo de pontos será salvo em: " caminho_arquivo))
+
+  (if (not (IAN:gerar-pontos-regua-core ss_base_gg 4.9 caminho_arquivo)) 
+    (progn (princ "\nFalha ao gerar pontos para a Geogrelha. Comando cancelado.") 
+           (exit)
+    )
+  )
+  (princ "\nPontos do eixo gerados com sucesso.")
+
+  ;; --- Etapa 2: Colocar Blocos (CBPM) ---
+  (setq nome_bloco_gg nil)
+  (while (not nome_bloco_gg) 
+    (setq ent_sel_data (entsel "\nSelecione o bloco modelo da GEOGRELHA: "))
+    (if ent_sel_data 
+      (if 
+        (= "AcDbBlockReference" 
+           (vla-get-ObjectName (setq vla_bloco_modelo (vlax-ename->vla-object (car ent_sel_data))))
+        )
+        (setq nome_bloco_gg (vla-get-EffectiveName vla_bloco_modelo))
+        (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
+      )
+      (progn (princ "\nSeleção de bloco cancelada.") (exit))
+    )
+  )
+  (IAN:cbpm-core caminho_arquivo nome_bloco_gg)
+  (princ "\n\n--- Primeira fiada de blocos de geogrelha criada. ---")
+
+  ;; --- Etapa 3: Inverter Geogrelhas (RTGG-Core) ---
+  (princ "\nSelecione TODAS as geogrelhas da fiada para inverter:")
+  (setq ss_geogrelhas_para_inverter (ssget '((0 . "INSERT"))))
+  (if ss_geogrelhas_para_inverter 
+    (progn 
+      (princ "\nInvertendo geogrelhas com comprimento fixo de 8.0...")
+      (IAN:rtgg-core ss_geogrelhas_para_inverter 8.0)
+      (princ "\n\n--- Geogrelhas invertidas. ---")
+    )
+    (princ "\nNenhuma geogrelha selecionada para inverter. Etapa pulada.")
+  )
+
+  ;; =================================================================
+  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CBE) ---
+  ;; =================================================================
+
+  ;; --- Etapa de Subida ---
+  (princ "\n\n--- Etapa de Subida ---")
+  (princ "\nSelecione os blocos e linhas de apoio para SUBIR (ou pressione ENTER para pular):")
+  (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+  (if ss_entidades_subir 
+    (progn 
+      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
+      (if z_final 
+        (IAN:cbe-core ss_entidades_subir "Subir" 0.1 1.0 z_final)
+        (princ "\nZ Final não informado. Etapa pulada.")
+      )
+    )
+    (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
+  )
+
+  ;; --- Etapa de Descida ---
+  (princ "\n\n--- Etapa de Descida ---")
+  (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
+  (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+  (if ss_entidades_descer 
+    (progn 
+      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
+      (if z_final 
+        (IAN:cbe-core ss_entidades_descer "Descer" 0.1 1.0 z_final)
+        (princ "\nZ Final não informado. Etapa pulada.")
+      )
+    )
+    (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+  )
+
+  ;; --- Finalização ---
+  (princ "\n\n>>> Construção de Muro de Geogrelha concluída! <<<")
+  (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
   (princ)
 )
+
 
 
 ;;;; ----------------------------------------------------------------------;;;;
