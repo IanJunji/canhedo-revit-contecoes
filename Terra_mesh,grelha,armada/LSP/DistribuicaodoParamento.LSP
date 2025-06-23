@@ -118,6 +118,139 @@
 ;;;                                                                        ;;;
 ;;;; ----------------------------------------------------------------------;;;;
 
+;;; --- Função "Core" para GPR: A lógica pura, sem interação com o usuário ---
+;;; Recebe os parâmetros e executa a geração de pontos.
+;;; Retorna T para sucesso, nil para falha.
+(defun IAN:gerar-pontos-regua-core (ss_linhas_alvo comprimento_regua arquivo_saida / 
+                                    *error* contador ent_nome ent_obj 
+                                    lista_todos_os_pontos f ponto_A ponto_B 
+                                    lista_pontos_entidade_atual 
+                                    primeiro_ponto_adicionado tolerancia 
+                                    start_pt_entidade_catch
+                                   ) 
+  (defun *error* (msg) 
+    (IAN:std-error msg (function (lambda () (setq f (IAN:close-handle f)))))
+  )
+
+  (setq tolerancia 0.0001)
+  (setq lista_todos_os_pontos nil)
+  (setq contador 0)
+  (princ 
+    (strcat "\nProcessando " 
+            (itoa (sslength ss_linhas_alvo))
+            " entidade(s) com régua de "
+            (rtos comprimento_regua)
+            "..."
+    )
+  )
+
+  (while (< contador (sslength ss_linhas_alvo)) 
+    (setq ent_nome (ssname ss_linhas_alvo contador))
+    (setq ent_obj (vlax-ename->vla-object ent_nome))
+    (princ 
+      (strcat "\nAnalisando entidade " 
+              (itoa (1+ contador))
+              " ("
+              (vla-get-ObjectName ent_obj)
+              "):"
+      )
+    )
+    (setq lista_pontos_entidade_atual nil)
+    (setq primeiro_ponto_adicionado nil)
+
+    (setq start_pt_entidade_catch (vl-catch-all-apply 'vlax-curve-getStartPoint 
+                                                      (list ent_obj)
+                                  )
+    )
+    (if (vl-catch-all-error-p start_pt_entidade_catch) 
+      (progn (princ (strcat "\n  [AVISO] Falha ao obter ponto inicial. Pulando.")) 
+             (setq ponto_A nil)
+      )
+      (setq ponto_A start_pt_entidade_catch)
+    )
+    (while ponto_A 
+      (setq ponto_B (IAN:gpr-find-next-point 
+                      ent_obj
+                      ponto_A
+                      comprimento_regua
+                      tolerancia
+                    )
+      )
+      (if ponto_B 
+        (progn 
+          (if (not primeiro_ponto_adicionado) 
+            (progn 
+              (setq lista_pontos_entidade_atual (cons ponto_A 
+                                                      lista_pontos_entidade_atual
+                                                )
+              )
+              (setq primeiro_ponto_adicionado T)
+            )
+          )
+          (setq lista_pontos_entidade_atual (cons ponto_B 
+                                                  lista_pontos_entidade_atual
+                                            )
+          )
+          (setq ponto_A ponto_B)
+        )
+        (setq ponto_A nil)
+      )
+    )
+    (if lista_pontos_entidade_atual 
+      (progn 
+        (setq lista_pontos_entidade_atual (reverse lista_pontos_entidade_atual))
+        (setq lista_todos_os_pontos (append lista_todos_os_pontos 
+                                            lista_pontos_entidade_atual
+                                    )
+        )
+        (princ 
+          (strcat " -> " (itoa (length lista_pontos_entidade_atual)) " pontos.")
+        )
+      )
+      (princ " -> Nenhum segmento completo.")
+    )
+    (setq contador (1+ contador))
+  )
+
+  (if lista_todos_os_pontos 
+    (progn 
+      (setq f (IAN:safe-open arquivo_saida "w"))
+      (if f 
+        (progn 
+          (princ 
+            (strcat "\n\nEscrevendo " 
+                    (itoa (length lista_todos_os_pontos))
+                    " pontos em: "
+                    arquivo_saida
+            )
+          )
+          (foreach pt lista_todos_os_pontos 
+            (write-line 
+              (strcat (rtos (car pt) 2 8) 
+                      ","
+                      (rtos (cadr pt) 2 8)
+                      ","
+                      (rtos (caddr pt) 2 8)
+              )
+              f
+            )
+          )
+          (setq f (IAN:close-handle f))
+          (princ "\nSucesso! Arquivo salvo.")
+          T ; Retorna T para sucesso
+        )
+        (progn 
+          (princ 
+            (strcat "\n[ERRO] Falha ao abrir arquivo para escrita: " arquivo_saida)
+          )
+          nil
+        )
+      )
+    )
+    (progn (princ "\n\nNenhum ponto gerado para salvar.") nil)
+  )
+)
+
 ;;; --- Função Auxiliar para GPR: Encontrar Próximo Ponto com Régua  ---
 (defun IAN:gpr-find-next-point (obj_curva pt_inicio comp_regua tol / mspace 
                                 melhor_ponto_B circulo_temp_raw circulo_obj 
@@ -266,166 +399,42 @@
   melhor_ponto_B
 )
 
-;;; --- Comando Principal: GERAR_PONTOS_REGUA ---
-(defun c:GERAR_PONTOS_REGUA (/ *error* ss_linhas_alvo contador ent_nome ent_obj 
-                             comprimento_regua arquivo_saida lista_todos_os_pontos f 
-                             ponto_A ponto_B lista_pontos_entidade_atual 
-                             primeiro_ponto_adicionado tolerancia 
-                             start_pt_entidade_catch old_osmode
+;;; --- Comando Principal: GERAR_PONTOS_REGUA (Interface com o Usuário) ---
+(defun c:GERAR_PONTOS_REGUA (/ *error* old_osmode ss_linhas_alvo comprimento_regua 
+                             arquivo_saida
                             ) 
   (defun *error* (msg) 
-    (IAN:std-error 
-      msg
-      (function 
-        (lambda () 
-          (setq f (IAN:close-handle f))
-          (IAN:restore-osnap old_osmode)
-        )
-      )
-    )
+    (IAN:std-error msg (function (lambda () (IAN:restore-osnap old_osmode))))
   )
   (setq old_osmode (IAN:disable-osnap))
-  (setq tolerancia 0.0001)
-  (setq comprimento_regua nil)
+
   (princ "\n>>> GERADOR DE PONTOS COM RÉGUA (GPR) <<<")
   (princ "\nSelecione as entidades alvo (linhas, polilinhas, arcos, splines): ")
   (setq ss_linhas_alvo (ssget '((0 . "LINE,LWPOLYLINE,ARC,SPLINE"))))
 
-  (if (null ss_linhas_alvo) 
-    (progn (princ "\nNenhuma entidade selecionada. Comando cancelado.") 
-           (IAN:restore-osnap old_osmode)
-           (exit)
-    )
-  )
-
-  (while (or (null comprimento_regua) (<= comprimento_regua 0.0)) 
-    (setq comprimento_regua (getdist "\nDigite o comprimento da régua/segmento: "))
-    (if (or (null comprimento_regua) (<= comprimento_regua 0.0)) 
-      (princ "\nComprimento inválido. Deve ser positivo.")
-    )
-  )
-  (setq arquivo_saida (getfiled "Salvar arquivo de coordenadas TXT" "" "txt" 1))
-  (if (null arquivo_saida) 
-    (progn (princ "\nNenhum arquivo selecionado. Comando cancelado.") 
-           (IAN:restore-osnap old_osmode)
-           (exit)
-    )
-  )
-
-  (setq lista_todos_os_pontos nil)
-  (setq contador 0)
-  (princ 
-    (strcat "\nProcessando " (itoa (sslength ss_linhas_alvo)) " entidade(s)...")
-  )
-
-  (while (< contador (sslength ss_linhas_alvo)) 
-    (setq ent_nome (ssname ss_linhas_alvo contador))
-    (setq ent_obj (vlax-ename->vla-object ent_nome))
-    (princ 
-      (strcat "\nAnalisando entidade " 
-              (itoa (1+ contador))
-              " ("
-              (vla-get-ObjectName ent_obj)
-              "):"
-      )
-    )
-    (setq lista_pontos_entidade_atual nil)
-    (setq primeiro_ponto_adicionado nil)
-
-    (setq start_pt_entidade_catch (vl-catch-all-apply 'vlax-curve-getStartPoint 
-                                                      (list ent_obj)
-                                  )
-    )
-    (if (vl-catch-all-error-p start_pt_entidade_catch) 
-      (progn 
-        (princ 
-          (strcat "\n  [GPR AVISO] Falha ao obter ponto inicial. Pulando. (" 
-                  (vl-catch-all-error-message start_pt_entidade_catch)
-                  ")"
-          )
-        )
-        (setq ponto_A nil)
-      )
-      (setq ponto_A start_pt_entidade_catch)
-    )
-    (while ponto_A 
-      (setq ponto_B (IAN:gpr-find-next-point 
-                      ent_obj
-                      ponto_A
-                      comprimento_regua
-                      tolerancia
-                    )
-      )
-      (if ponto_B 
-        (progn 
-          (if (not primeiro_ponto_adicionado) 
-            (progn 
-              (setq lista_pontos_entidade_atual (cons ponto_A 
-                                                      lista_pontos_entidade_atual
-                                                )
-              )
-              (setq primeiro_ponto_adicionado T)
-            )
-          )
-          (setq lista_pontos_entidade_atual (cons ponto_B 
-                                                  lista_pontos_entidade_atual
-                                            )
-          )
-          (setq ponto_A ponto_B)
-        )
-        (setq ponto_A nil)
-      )
-    )
-    (if lista_pontos_entidade_atual 
-      (progn 
-        (setq lista_pontos_entidade_atual (reverse lista_pontos_entidade_atual))
-        (setq lista_todos_os_pontos (append lista_todos_os_pontos 
-                                            lista_pontos_entidade_atual
-                                    )
-        )
-        (princ 
-          (strcat " -> " (itoa (length lista_pontos_entidade_atual)) " pontos.")
-        )
-      )
-      (princ " -> Nenhum segmento completo.")
-    )
-    (setq contador (1+ contador))
-  )
-  (if lista_todos_os_pontos 
+  (if ss_linhas_alvo 
     (progn 
-      (setq f (IAN:safe-open arquivo_saida "w"))
-      (if f 
-        (progn 
-          (princ 
-            (strcat "\n\nEscrevendo " 
-                    (itoa (length lista_todos_os_pontos))
-                    " pontos em: "
-                    arquivo_saida
-            )
-          )
-          (foreach pt lista_todos_os_pontos 
-            (write-line 
-              (strcat (rtos (car pt) 2 8) 
-                      ","
-                      (rtos (cadr pt) 2 8)
-                      ","
-                      (rtos (caddr pt) 2 8)
-              )
-              f
-            )
-          )
-          (setq f (IAN:close-handle f))
-          (princ "\nSucesso! Arquivo salvo.")
-        )
-        (princ 
-          (strcat "\n[GPR ERRO] Falha ao abrir arquivo para escrita: " 
-                  arquivo_saida
-          )
+      (while (or (null comprimento_regua) (<= comprimento_regua 0.0)) 
+        (setq comprimento_regua (getdist "\nDigite o comprimento da régua/segmento: "))
+        (if (or (null comprimento_regua) (<= comprimento_regua 0.0)) 
+          (princ "\nComprimento inválido. Deve ser positivo.")
         )
       )
+      (setq arquivo_saida (getfiled "Salvar arquivo de coordenadas TXT" "" "txt" 1))
+
+      ;; Se o usuário forneceu todos os dados, chama a função "Motor"
+      (if arquivo_saida 
+        (IAN:gerar-pontos-regua-core 
+          ss_linhas_alvo
+          comprimento_regua
+          arquivo_saida
+        )
+        (princ "\nNenhum arquivo selecionado. Comando cancelado.")
+      )
     )
-    (princ "\n\nNenhum ponto gerado para salvar.")
+    (princ "\nNenhuma entidade selecionada. Comando cancelado.")
   )
+
   (IAN:restore-osnap old_osmode)
   (princ)
 )
@@ -437,6 +446,164 @@
 ;;;       COMANDO: COLOCAR_BLOCO_EM_PONTOS_MEDIOS (CBPM)                   ;;;
 ;;;                                                                        ;;;
 ;;;; ----------------------------------------------------------------------;;;;
+
+;;; --- Função "Core" para CBPM: A lógica pura, sem interação com o usuário ---
+(defun IAN:cbpm-core (arquivo_txt nome_bloco_real / *error* f linha lineno 
+                      lista_pontos_lidos p_temp i p_orig_A p_orig_B p_medio_calc 
+                      lista_segmentos_para_blocos layer_alvo_nome vla_layer_alvo 
+                      angulo_insercao old_clayer contador_blocos_inseridos mspace doc 
+                      tolerancia_dist vla_bloco_inserido_raw segmento
+                     ) 
+  (defun *error* (msg) 
+    (IAN:std-error 
+      msg
+      (function 
+        (lambda () 
+          (setq f (IAN:close-handle f))
+          (if old_clayer (setvar "CLAYER" old_clayer))
+        )
+      )
+    )
+  )
+
+  (setq layer_alvo_nome "BLOCOS_PONTOS_MEDIOS")
+  (setq contador_blocos_inseridos 0)
+  (setq lista_pontos_lidos nil)
+  (setq lista_segmentos_para_blocos nil)
+  (setq tolerancia_dist 0.00001)
+  (setq z_tolerance 0.01)
+  (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))
+  (setq mspace (vla-get-ModelSpace doc))
+  (setq old_clayer (getvar "CLAYER"))
+
+  (setq f (IAN:safe-open arquivo_txt "r"))
+  (if (not f) 
+    (progn 
+      (princ 
+        (strcat "\n[ERRO] Falha ao abrir arquivo para CBPM-Core: " arquivo_txt)
+      )
+      (exit)
+    )
+  )
+
+  (princ (strcat "\nLendo arquivo de pontos: " arquivo_txt))
+  (setq lineno 0)
+  (while (setq linha (read-line f)) 
+    (setq lineno (1+ lineno))
+    (setq p_temp (IAN:cbpm-string-to-pointlist linha))
+    (if p_temp (setq lista_pontos_lidos (cons p_temp lista_pontos_lidos)))
+  )
+  (setq f (IAN:close-handle f))
+  (setq lista_pontos_lidos (reverse lista_pontos_lidos))
+
+  (if (< (length lista_pontos_lidos) 2) 
+    (progn (princ "\n[ERRO] Menos de 2 pontos válidos lidos.") (exit))
+  )
+
+  (setq i 0)
+  (while (< i (1- (length lista_pontos_lidos))) 
+    (setq p_orig_A (nth i lista_pontos_lidos))
+    (setq p_orig_B (nth (1+ i) lista_pontos_lidos))
+    (if (<= (abs (- (caddr p_orig_A) (caddr p_orig_B))) z_tolerance) 
+      (if (> (distance p_orig_A p_orig_B) tolerancia_dist) 
+        (setq lista_segmentos_para_blocos (cons 
+                                            (list 
+                                              (list 
+                                                (/ 
+                                                  (+ (car p_orig_A) (car p_orig_B))
+                                                  2.0
+                                                )
+                                                (/ 
+                                                  (+ (cadr p_orig_A) 
+                                                     (cadr p_orig_B)
+                                                  )
+                                                  2.0
+                                                )
+                                                (/ 
+                                                  (+ (caddr p_orig_A) 
+                                                     (caddr p_orig_B)
+                                                  )
+                                                  2.0
+                                                )
+                                              )
+                                              p_orig_A
+                                              p_orig_B
+                                            )
+                                            lista_segmentos_para_blocos
+                                          )
+        )
+      )
+    )
+    (setq i (1+ i))
+  )
+  (setq lista_segmentos_para_blocos (reverse lista_segmentos_para_blocos))
+
+  (if (null lista_segmentos_para_blocos) 
+    (progn (princ "\n[ERRO] Nenhum segmento válido para pontos médios.") (exit))
+  )
+  (princ 
+    (strcat "\n" 
+            (itoa (length lista_segmentos_para_blocos))
+            " pontos médios calculados."
+    )
+  )
+
+  (setq vla_layer_alvo (IAN:cbpm-ensure-layer layer_alvo_nome 7))
+  (if (not vla_layer_alvo) (setq layer_alvo_nome old_clayer))
+
+  (princ 
+    (strcat "\nInserindo blocos '" nome_bloco_real "' na layer '" layer_alvo_nome 
+            "'..."
+    )
+  )
+  (foreach segmento lista_segmentos_para_blocos 
+    (setq p_medio_calc (car segmento)
+          p_orig_A     (cadr segmento)
+          p_orig_B     (caddr segmento)
+    )
+    (setq angulo_insercao (angle p_orig_A p_orig_B))
+    (setq vla_bloco_inserido_raw (vl-catch-all-apply 'vla-InsertBlock 
+                                                     (list mspace 
+                                                           (vlax-3d-point p_medio_calc)
+                                                           nome_bloco_real
+                                                           1.0
+                                                           1.0
+                                                           1.0
+                                                           angulo_insercao
+                                                     )
+                                 )
+    )
+    (if (not (vl-catch-all-error-p vla_bloco_inserido_raw)) 
+      (progn 
+        (setq contador_blocos_inseridos (1+ contador_blocos_inseridos))
+        (if vla_layer_alvo (vla-put-Layer vla_bloco_inserido_raw layer_alvo_nome))
+        (princ ".")
+      )
+      (princ 
+        (strcat "\n  [ERRO] Falha ao inserir bloco '" 
+                nome_bloco_real
+                "' em "
+                (vl-princ-to-string p_medio_calc)
+        )
+      )
+    )
+  )
+
+  (if (> contador_blocos_inseridos 0) 
+    (progn 
+      (princ 
+        (strcat "\nSucesso! " 
+                (itoa contador_blocos_inseridos)
+                " bloco(s) '"
+                nome_bloco_real
+                "' inserido(s)."
+        )
+      )
+      T
+    )
+    (progn (princ "\nNenhum bloco foi inserido.") nil)
+  )
+)
 
 ;;; --- Função Auxiliar para CBPM: Converter String "X,Y,Z" para Lista de Pontos ---
 (defun IAN:cbpm-string-to-pointlist (str_coords / str-split-by-comma str-to-real 
@@ -550,41 +717,14 @@
   vla_layer
 )
 
-;;; --- Comando Principal: COLOCAR_BLOCO_EM_PONTOS_MEDIOS ---
-(defun c:COLOCAR_BLOCO_EM_PONTOS_MEDIOS (/ *error* arquivo_txt f linha lineno 
-                                         lista_pontos_lidos p_temp i p_orig_A p_orig_B 
-                                         p_medio_calc lista_segmentos_para_blocos 
-                                         ent_sel_data nome_bloco_real 
-                                         vla_bloco_selecionado_raw vla_bloco_modelo 
-                                         layer_alvo_nome vla_layer_alvo 
-                                         angulo_insercao old_clayer 
-                                         contador_blocos_inseridos mspace doc 
-                                         tolerancia_dist z_tolerance ; <-- Nova variável
-                                         selecao_valida vla_bloco_inserido_raw 
-                                         old_osmode
+;;; --- Comando Principal: COLOCAR_BLOCO_EM_PONTOS_MEDIOS (Interface com o Usuário) ---
+(defun c:COLOCAR_BLOCO_EM_PONTOS_MEDIOS (/ *error* old_osmode arquivo_txt 
+                                         ent_sel_data nome_bloco_real vla_bloco_modelo
                                         ) 
   (defun *error* (msg) 
-    (IAN:std-error 
-      msg
-      (function 
-        (lambda () 
-          (setq f (IAN:close-handle f))
-          (if old_clayer (setvar "CLAYER" old_clayer))
-          (IAN:restore-osnap old_osmode)
-        )
-      )
-    )
+    (IAN:std-error msg (function (lambda () (IAN:restore-osnap old_osmode))))
   )
   (setq old_osmode (IAN:disable-osnap))
-  (setq layer_alvo_nome "BLOCOS_PONTOS_MEDIOS")
-  (setq contador_blocos_inseridos 0)
-  (setq lista_pontos_lidos nil)
-  (setq lista_segmentos_para_blocos nil)
-  (setq tolerancia_dist 0.00001)
-  (setq z_tolerance 0.01) ; Tolerância para a variação em Z (ex: 1cm). Mude se necessário.
-  (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))
-  (setq mspace (vla-get-ModelSpace doc))
-  (setq old_clayer (getvar "CLAYER"))
 
   (princ "\n>>> INSERIR BLOCOS EM PONTOS MÉDIOS (CBPM) <<<")
 
@@ -594,211 +734,37 @@
                               0
                     )
   )
-  (if (or (null arquivo_txt) (not (findfile arquivo_txt))) 
-    (progn (princ "\nArquivo não selecionado/encontrado. Comando cancelado.") 
-           (IAN:restore-osnap old_osmode)
-           (exit)
-    )
-  )
-  (setq f (IAN:safe-open arquivo_txt "r"))
-  (if (not f) 
-    (progn (princ (strcat "\n[CBPM ERRO] Falha ao abrir arquivo: " arquivo_txt)) 
-           (IAN:restore-osnap old_osmode)
-           (exit)
-    )
-  )
-
-  (princ (strcat "\nLendo arquivo: " arquivo_txt))
-  (setq lineno 0)
-  (while (setq linha (read-line f)) 
-    (setq lineno (1+ lineno))
-    (setq p_temp (IAN:cbpm-string-to-pointlist linha))
-    (if p_temp 
-      (setq lista_pontos_lidos (cons p_temp lista_pontos_lidos))
-      (princ 
-        (strcat "\n  [CBPM AVISO] Linha " (itoa lineno) " ignorada: \"" linha "\"")
-      )
-    )
-  )
-  (setq f (IAN:close-handle f))
-  (setq lista_pontos_lidos (reverse lista_pontos_lidos))
-
-  (if (< (length lista_pontos_lidos) 2) 
-    (progn (princ "\n[CBPM ERRO] Menos de 2 pontos válidos lidos. Comando cancelado.") 
-           (IAN:restore-osnap old_osmode)
-           (exit)
-    )
-  )
-  (princ (strcat "\n" (itoa (length lista_pontos_lidos)) " pontos válidos lidos."))
-
-  ;; *** LÓGICA DE PROCESSAMENTO DE SEGMENTOS MODIFICADA AQUI ***
-  (setq i 0)
-  (while (< i (1- (length lista_pontos_lidos))) 
-    (setq p_orig_A (nth i lista_pontos_lidos))
-    (setq p_orig_B (nth (1+ i) lista_pontos_lidos))
-
-    ;; --- NOVA VERIFICAÇÃO DE Z ---
-    ;; Verifica se a variação em Z está dentro da tolerância
-    (if (<= (abs (- (caddr p_orig_A) (caddr p_orig_B))) z_tolerance) 
-      ;; Se Z for contínuo, processa o segmento como antes
-      (if (> (distance p_orig_A p_orig_B) tolerancia_dist) 
-        (progn 
-          (setq p_medio_calc (list (/ (+ (car p_orig_A) (car p_orig_B)) 2.0) 
-                                   (/ (+ (cadr p_orig_A) (cadr p_orig_B)) 2.0)
-                                   (/ (+ (caddr p_orig_A) (caddr p_orig_B)) 2.0)
-                             )
-          )
-          (setq lista_segmentos_para_blocos (cons 
-                                              (list p_medio_calc p_orig_A p_orig_B)
-                                              lista_segmentos_para_blocos
-                                            )
-          )
-        )
-        (princ 
-          (strcat "\n  [CBPM AVISO] Segmento " 
-                  (itoa (1+ i))
-                  "-"
-                  (itoa (+ i 2))
-                  " ignorado (curto/coincidente)."
-          )
-        )
-      )
-      ;; Se Z tiver uma quebra, ignora o segmento e avisa o usuário
-      (princ 
-        (strcat "\n  [CBPM AVISO] Quebra de sequência em Z detectada entre pontos " 
-                (itoa (1+ i))
-                " e "
-                (itoa (+ i 2))
-                ". Segmento ignorado."
-        )
-      )
-    )
-    (setq i (1+ i))
-  )
-  (setq lista_segmentos_para_blocos (reverse lista_segmentos_para_blocos))
-
-  (if (null lista_segmentos_para_blocos) 
-    (progn (princ "\n[CBPM ERRO] Nenhum segmento válido para pontos médios. Verifique o arquivo.") 
-           (IAN:restore-osnap old_osmode)
-           (exit)
-    )
-  )
-  (princ 
-    (strcat "\n" 
-            (itoa (length lista_segmentos_para_blocos))
-            " pontos médios calculados."
-    )
-  )
-
-  (setq selecao_valida nil)
-  (setq nome_bloco_real nil)
-  (setq vla_bloco_modelo nil)
-  (while (not selecao_valida) 
-    (setq ent_sel_data (entsel "\nSelecione o bloco modelo a ser inserido: "))
-    (if ent_sel_data 
-      (progn 
-        (setq vla_bloco_selecionado_raw (vl-catch-all-apply 'vlax-ename->vla-object 
-                                                            (list (car ent_sel_data))
-                                        )
-        )
-        (if (not (vl-catch-all-error-p vla_bloco_selecionado_raw)) 
-          (progn 
-            (setq vla_bloco_modelo vla_bloco_selecionado_raw)
-            (if 
-              (and vla_bloco_modelo 
-                   (vlax-property-available-p vla_bloco_modelo 'ObjectName)
-                   (= (vla-get-ObjectName vla_bloco_modelo) "AcDbBlockReference")
-              )
-              (progn 
-                (setq nome_bloco_real (vla-get-EffectiveName vla_bloco_modelo))
-                (princ (strcat "\nBloco selecionado: '" nome_bloco_real "'."))
-                (setq selecao_valida T)
-              )
-              (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
-            )
-          )
-          (princ 
-            (strcat "\n[CBPM ERRO] Conversão para objeto VLA: " 
-                    (vl-catch-all-error-message vla_bloco_selecionado_raw)
-            )
-          )
-        )
-      )
-      (progn (princ "\nSeleção cancelada. Comando encerrado.") 
-             (IAN:restore-osnap old_osmode)
-             (exit)
-      )
-    )
-  )
-  (setq vla_layer_alvo (IAN:cbpm-ensure-layer layer_alvo_nome 7))
-  (if (not vla_layer_alvo) 
+  (if (and arquivo_txt (findfile arquivo_txt)) 
     (progn 
-      (princ 
-        (strcat "\n[CBPM AVISO] Falha layer '" 
-                layer_alvo_nome
-                "'. Usando layer atual: "
-                old_clayer
-        )
-      )
-      (setq layer_alvo_nome old_clayer)
-    )
-  )
-  (princ (strcat "\nInserindo blocos na layer '" layer_alvo_nome "'..."))
-  (foreach segmento lista_segmentos_para_blocos 
-    (setq p_medio_calc (car segmento))
-    (setq p_orig_A (cadr segmento))
-    (setq p_orig_B (caddr segmento))
-    (setq angulo_insercao (angle p_orig_A p_orig_B))
-
-    (setq vla_bloco_inserido_raw (vl-catch-all-apply 'vla-InsertBlock 
-                                                     (list mspace 
-                                                           (vlax-3d-point p_medio_calc)
-                                                           nome_bloco_real
-                                                           1.0
-                                                           1.0
-                                                           1.0
-                                                           angulo_insercao
-                                                     )
-                                 )
-    )
-    (if (not (vl-catch-all-error-p vla_bloco_inserido_raw)) 
-      (progn 
-        (setq contador_blocos_inseridos (1+ contador_blocos_inseridos))
-        (if 
-          (and vla_layer_alvo 
-               (vlax-method-applicable-p vla_bloco_inserido_raw 'put_Layer)
-          )
-          (vla-put-Layer vla_bloco_inserido_raw layer_alvo_nome)
-          (princ 
-            (strcat "\n  [CBPM AVISO] Não foi possível definir a layer para o bloco inserido no ponto " 
-                    (vl-princ-to-string p_medio_calc)
+      (setq nome_bloco_real nil)
+      (while (not nome_bloco_real) 
+        (setq ent_sel_data (entsel "\nSelecione o bloco modelo a ser inserido: "))
+        (if ent_sel_data 
+          (if 
+            (= "AcDbBlockReference" 
+               (vla-get-ObjectName 
+                 (setq vla_bloco_modelo (vlax-ename->vla-object (car ent_sel_data)))
+               )
             )
+            (setq nome_bloco_real (vla-get-EffectiveName vla_bloco_modelo))
+            (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
           )
-        )
-        (princ ".")
-      )
-      (princ 
-        (strcat "\n  [CBPM ERRO] Falha ao inserir bloco '" 
-                nome_bloco_real
-                "' em "
-                (vl-princ-to-string p_medio_calc)
-                ": "
-                (vl-catch-all-error-message vla_bloco_inserido_raw)
+          (setq nome_bloco_real "cancel") ; Sai do loop se o usuário pressionar ESC
         )
       )
-    )
-  )
-  (if (> contador_blocos_inseridos 0) 
-    (princ 
-      (strcat "\nSucesso! " 
-              (itoa contador_blocos_inseridos)
-              " bloco(s) '"
-              nome_bloco_real
-              "' inserido(s)."
+
+      (if (not (equal nome_bloco_real "cancel")) 
+        (progn 
+          (princ (strcat "\nBloco selecionado: '" nome_bloco_real "'."))
+          ;; Chama a função "Motor" com os dados do usuário
+          (IAN:cbpm-core arquivo_txt nome_bloco_real)
+        )
+        (princ "\nSeleção de bloco cancelada.")
       )
     )
-    (princ "\nNenhum bloco foi inserido.")
+    (princ "\nArquivo não selecionado ou não encontrado. Comando cancelado.")
   )
+
   (IAN:restore-osnap old_osmode)
   (princ)
 )
@@ -1036,7 +1002,8 @@
 ;;;-----------------------------------------------------------------------------
 
 ;;; --- Função Auxiliar para CBE: Lógica do Modo ZIG-ZAG ---
-(defun IAN:cbe-executar-zigzag (blocos_na_base blocos_deslocados mspace / 
+(defun IAN:cbe-executar-zigzag (blocos_na_base blocos_deslocados mspace 
+                                direcao_escada_str offset_h alt_v z_final / 
                                 direcao_escada_str direcao_sinal_z offset_h alt_v 
                                 z_final total_blocos_movidos total_blocos_criados 
                                 ; Vars para mover blocos deslocados
@@ -1051,26 +1018,8 @@
                                 novo_y novo_z ponto_insercao_nova_camada 
                                 vla_bloco_copiado
                                ) 
-  (princ "\nDetectado padrão intercalado. Executando modo ZIG-ZAG...")
-
-  ;; --- Inputs do Usuário para o modo ZIG-ZAG ---
-  (initget "Subir Descer")
-  (setq direcao_escada_str (getkword "\nA escadinha será para [Subir/Descer]?: "))
-  (if (null direcao_escada_str) 
-    (progn (princ "\nOpção inválida. Abortado.") (exit))
-  )
+  (princ "\nExecutando modo ZIG-ZAG...")
   (setq direcao_sinal_z (if (eq direcao_escada_str "Subir") 1.0 -1.0))
-
-  (setq offset_h (getdist "\nDigite o offset horizontal por camada (recuo/avanço): "))
-  (if (null offset_h) (progn (princ "\nOffset não fornecido. Abortado.") (exit)))
-
-  (setq alt_v (getdist "\nDigite a altura vertical por camada (altura do degrau): "))
-  (if (or (null alt_v) (<= alt_v 0.0)) 
-    (progn (princ "\nAltura inválida. Abortado.") (exit))
-  )
-
-  (setq z_final (getreal "\nDigite a coordenada Z final desejada para a última camada: "))
-  (if (null z_final) (progn (princ "\nZ final não fornecido. Abortado.") (exit)))
 
   (setq total_blocos_movidos 0)
   (setq total_blocos_criados 0)
@@ -1087,7 +1036,11 @@
       (foreach bloco_a_mover blocos_deslocados 
         (setq pt_atual_bloco (IAN:abs-get-insertion-point-list bloco_a_mover))
         (setq rot_bloco (vla-get-Rotation bloco_a_mover))
-        (setq angulo_direcao_offset_h (+ rot_bloco (/ PI 2.0)))
+        (setq angulo_direcao_offset_h (if (eq direcao_escada_str "Subir") 
+                                        (+ rot_bloco (/ PI 2.0))
+                                        (- rot_bloco (/ PI 2.0))
+                                      )
+        )
         (setq offset_vetor_unit_x (cos angulo_direcao_offset_h))
         (setq offset_vetor_unit_y (sin angulo_direcao_offset_h))
         (setq novo_ponto_movido (list 
@@ -1151,7 +1104,11 @@
 
         (if (> qnt_novas_camadas 0) 
           (progn 
-            (setq angulo_direcao_offset_h (+ rot_base (/ PI 2.0)))
+            (setq angulo_direcao_offset_h (if (eq direcao_escada_str "Subir") 
+                                            (+ rot_base (/ PI 2.0))
+                                            (- rot_base (/ PI 2.0))
+                                          )
+            )
             (setq offset_vetor_unit_x (cos angulo_direcao_offset_h))
             (setq offset_vetor_unit_y (sin angulo_direcao_offset_h))
             (setq n 1)
@@ -1270,7 +1227,8 @@
 )
 
 ;;; --- Função Auxiliar para CBE: Lógica do Modo Escadinha Simples ---
-(defun IAN:cbe-executar-escadinha-simples (blocos_na_base mspace / 
+(defun IAN:cbe-executar-escadinha-simples (blocos_na_base mspace direcao_escada_str 
+                                           offset_h alt_v z_final / 
                                            bloco_base_process_list vla_bloco_base 
                                            pt_base_list rot_base nome_base 
                                            layer_bloco_original direcao_escada_str 
@@ -1284,6 +1242,7 @@
                                            vla_bloco_copiado
                                           ) 
   (princ "\nModo: Escadinha Simples. Todos os blocos estão na base.")
+  (setq direcao_sinal_z (if (eq direcao_escada_str "Subir") 1.0 -1.0))
 
   ;; Prepara a lista de blocos no formato esperado pela lógica de processamento
   (setq bloco_base_process_list nil)
@@ -1301,26 +1260,6 @@
     )
   )
   (setq bloco_base_process_list (reverse bloco_base_process_list))
-
-  ;; --- Inputs do Usuário ---
-  (initget "Subir Descer")
-  (setq direcao_escada_str (getkword "\nA escadinha será para [Subir/Descer] em relação à camada base?: "))
-  (if (null direcao_escada_str) 
-    (progn (princ "\nOpção inválida. Comando Cancelado.") (exit))
-  )
-  (setq direcao_sinal_z (if (eq direcao_escada_str "Subir") 1.0 -1.0))
-  (setq offset_h (getdist "\nDigite o offset horizontal por camada (recuo/avanço): "))
-  (if (null offset_h) 
-    (progn (princ "\nOffset horizontal não fornecido. Comando Cancelado.") (exit))
-  )
-  (setq alt_v (getdist "\nDigite a altura vertical por camada (altura do bloco/degrau): "))
-  (if (or (null alt_v) (<= alt_v 0.0)) 
-    (progn (princ "\nAltura vertical inválida ou zero. Comando Cancelado.") (exit))
-  )
-  (setq z_final (getreal "\nDigite a coordenada Z final desejada para a última camada: "))
-  (if (null z_final) 
-    (progn (princ "\nZ final não fornecido. Comando Cancelado.") (exit))
-  )
 
   ;; --- Processamento ---
   (setq total_blocos_criados 0)
@@ -1356,7 +1295,11 @@
                   " camada(s)..."
           )
         )
-        (setq angulo_direcao_offset_h (+ rot_base (/ PI 2.0)))
+        (setq angulo_direcao_offset_h (if (eq direcao_escada_str "Subir") 
+                                        (+ rot_base (/ PI 2.0)) ; Se for "Subir", mantém como estava
+                                        (- rot_base (/ PI 2.0)) ; Se for "Descer", inverte o lado
+                                      )
+        )
         (setq offset_vetor_unit_x (cos angulo_direcao_offset_h)
               offset_vetor_unit_y (sin angulo_direcao_offset_h)
         )
@@ -1421,15 +1364,80 @@
   )
 )
 
+
+;;; --- Função "Motor" para CBE: Executa a lógica com parâmetros definidos ---
+(defun IAN:cbe-core (ss_entidades direcao_escada_str offset_h alt_v z_final / doc 
+                     mspace i ent_name vla_ent lista_blocos lista_linhas_apoio 
+                     listas_classificadas blocos_na_base blocos_deslocados
+                    ) 
+  ;; --- Inicialização ---
+  (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))
+  (setq mspace (vla-get-ModelSpace doc))
+
+  ;; --- Separar Entidades em Listas ---
+  (setq lista_blocos       nil
+        lista_linhas_apoio nil
+        i                  0
+  )
+  (while (< i (sslength ss_entidades)) 
+    (setq ent_name (ssname ss_entidades i))
+    (setq vla_ent (vlax-ename->vla-object ent_name))
+    (cond 
+      ((= (vla-get-ObjectName vla_ent) "AcDbBlockReference")
+       (setq lista_blocos (cons vla_ent lista_blocos))
+      )
+      ((member (vla-get-ObjectName vla_ent) '("AcDbLine" "AcDbPolyline"))
+       (setq lista_linhas_apoio (cons vla_ent lista_linhas_apoio))
+      )
+    )
+    (setq i (1+ i))
+  )
+  (if (or (null lista_blocos) (null lista_linhas_apoio)) 
+    (progn (princ "\n[ERRO] A seleção deve conter tanto blocos quanto linhas/polilinhas.") 
+           (exit)
+    )
+  )
+
+  (princ 
+    (strcat "\n" 
+            (itoa (length lista_blocos))
+            " bloco(s) e "
+            (itoa (length lista_linhas_apoio))
+            " linha(s) de apoio na seleção."
+    )
+  )
+
+  ;; --- Classificar Blocos ---
+  (setq listas_classificadas (IAN:cbe-classificar-blocos 
+                               lista_blocos
+                               lista_linhas_apoio
+                               mspace
+                             )
+  )
+  (setq blocos_na_base (car listas_classificadas))
+  (setq blocos_deslocados (cadr listas_classificadas))
+
+  ;; --- Decidir o Modo de Execução (Dispatcher) ---
+  (if (null blocos_deslocados) 
+    ;; MODO 1: ESCADINHA SIMPLES
+    (IAN:cbe-executar-escadinha-simples blocos_na_base mspace direcao_escada_str 
+                                        offset_h alt_v z_final
+    )
+    ;; MODO 2: ZIG-ZAG
+    (IAN:cbe-executar-zigzag blocos_na_base blocos_deslocados mspace 
+                             direcao_escada_str offset_h alt_v z_final
+    )
+  )
+  (princ)
+)
+
 ;;;
 ;;; c:CRIAR_CAMADAS_BLOCO_ESCADINHA (CBE) 
-;;; Função principal que atua como um dispatcher, decidindo qual modo executar.
+;;; Função principal que coleta dados do usuário e chama o motor IAN:cbe-core.
 ;;;
 (defun c:CRIAR_CAMADAS_BLOCO_ESCADINHA (/ *error* old_cmdecho old_clayer old_osmode 
-                                        ss_entidades_selecionadas i ent_name vla_ent 
-                                        lista_blocos lista_linhas_apoio 
-                                        listas_classificadas blocos_na_base 
-                                        blocos_deslocados doc mspace
+                                        ss_entidades_selecionadas direcao_escada_str 
+                                        offset_h alt_v z_final
                                        ) 
   ;; --- Manipulador de Erro Local ---
   (defun *error* (msg) 
@@ -1450,76 +1458,30 @@
   (setvar "CMDECHO" 0)
   (setq old_clayer (getvar "CLAYER"))
   (setq old_osmode (IAN:disable-osnap))
-  (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))
-  (setq mspace (vla-get-ModelSpace doc))
 
-  (princ "\n>>> CRIAR CAMADAS DE BLOCO EM ESCADINHA (CBE v2.1) <<<")
+  (princ "\n>>> CRIAR CAMADAS DE BLOCO EM ESCADINHA (CBE v2.2) <<<")
 
-  ;; --- Etapa 1: Selecionar Blocos e Linhas/Polilinhas de Apoio ---
+  ;; --- Etapa 1: Coletar TODOS os parâmetros do usuário ---
   (princ "\nSelecione os blocos base E as linhas/polilinhas de apoio:")
   (setq ss_entidades_selecionadas (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-  (if (null ss_entidades_selecionadas) 
-    (progn (princ "\nNenhuma entidade selecionada. Comando cancelado.") 
-           (*error* "Seleção cancelada")
-           (exit)
-    )
-  )
 
-  ;; --- Etapa 2: Separar Entidades em Listas ---
-  (setq lista_blocos       nil
-        lista_linhas_apoio nil
-  )
-  (setq i 0)
-  (while (< i (sslength ss_entidades_selecionadas)) 
-    (setq ent_name (ssname ss_entidades_selecionadas i))
-    (setq vla_ent (vlax-ename->vla-object ent_name))
-    (cond 
-      ((= (vla-get-ObjectName vla_ent) "AcDbBlockReference")
-       (setq lista_blocos (cons vla_ent lista_blocos))
-      )
-      ((member (vla-get-ObjectName vla_ent) '("AcDbLine" "AcDbPolyline"))
-       (setq lista_linhas_apoio (cons vla_ent lista_linhas_apoio))
+  (if ss_entidades_selecionadas 
+    (progn 
+      (initget "Subir Descer")
+      (setq direcao_escada_str (getkword "\nA escadinha será para [Subir/Descer]?: "))
+      (setq offset_h (getdist "\nDigite o offset horizontal por camada (recuo/avanço): "))
+      (setq alt_v (getdist "\nDigite a altura vertical por camada (altura do degrau): "))
+      (setq z_final (getreal "\nDigite a coordenada Z final desejada para a última camada: "))
+
+      ;; --- Etapa 2: Validar e Chamar o Motor ---
+      (if (and direcao_escada_str offset_h alt_v z_final (> alt_v 0.0)) 
+        (IAN:cbe-core ss_entidades_selecionadas direcao_escada_str offset_h alt_v 
+                      z_final
+        )
+        (princ "\nParâmetros inválidos ou cancelados. Comando encerrado.")
       )
     )
-    (setq i (1+ i))
-  )
-  (if (null lista_blocos) 
-    (progn (princ "\nNenhum bloco encontrado na seleção.") 
-           (*error* "Faltam blocos")
-           (exit)
-    )
-  )
-  (if (null lista_linhas_apoio) 
-    (progn (princ "\nNenhuma linha/polilinha de apoio encontrada na seleção.") 
-           (*error* "Faltam linhas de apoio")
-           (exit)
-    )
-  )
-  (princ 
-    (strcat "\n" 
-            (itoa (length lista_blocos))
-            " bloco(s) e "
-            (itoa (length lista_linhas_apoio))
-            " linha(s) de apoio selecionada(s)."
-    )
-  )
-
-  ;; --- Etapa 3: Classificar Blocos chamando a função auxiliar ---
-  (setq listas_classificadas (IAN:cbe-classificar-blocos 
-                               lista_blocos
-                               lista_linhas_apoio
-                               mspace
-                             )
-  )
-  (setq blocos_na_base (car listas_classificadas))
-  (setq blocos_deslocados (cadr listas_classificadas))
-
-  ;; --- Etapa 4: Decidir o Modo de Execução (Dispatcher) ---
-  (if (null blocos_deslocados) 
-    ;; MODO 1: ESCADINHA SIMPLES
-    (IAN:cbe-executar-escadinha-simples blocos_na_base mspace)
-    ;; MODO 2: ZIG-ZAG
-    (IAN:cbe-executar-zigzag blocos_na_base blocos_deslocados mspace)
+    (princ "\nNenhuma entidade selecionada. Comando cancelado.")
   )
 
   ;; --- Finalização ---
@@ -2259,45 +2221,55 @@
 ;;;; ----------------------------------------------------------------------;;;;
 
 ;;; --- Função de Desenho para o Menu Gráfico ---
-(defun IAN:desenhar-menu-grafico (titulo opcoes p1 p2 p3 p4 item_height item_realcado texto_size /
-                                  entidades_menu i start_y texto_y texto_x cor)
-  
+(defun IAN:desenhar-menu-grafico (titulo opcoes p1 p2 p3 p4 item_height item_realcado 
+                                  texto_size / entidades_menu i start_y texto_y 
+                                  texto_x cor
+                                 ) 
+
   (setq entidades_menu nil)
 
   ;; --- 1. CRIA O FUNDO SÓLIDO PRIMEIRO ---
-  (entmake (list '(0 . "SOLID")
-                 (cons 10 p1) ; Canto Superior Esquerdo
-                 (cons 11 p2) ; Canto Superior Direito
-                 (cons 12 p4) ; Canto Inferior Esquerdo
-                 (cons 13 p3) ; Canto Inferior Direito
-                 '(62 . 8)   ; Cor (Cinza Escuro)
-           )
+  (entmake 
+    (list '(0 . "SOLID") 
+          (cons 10 p1) ; Canto Superior Esquerdo
+          (cons 11 p2) ; Canto Superior Direito
+          (cons 12 p4) ; Canto Inferior Esquerdo
+          (cons 13 p3) ; Canto Inferior Direito
+          '(62 . 8) ; Cor (Cinza Escuro)
+    )
   )
   (setq entidades_menu (cons (entlast) entidades_menu))
 
 
   ;; --- 2. DESENHA A BORDA E O REALCE TEMPORÁRIO ---
-  (grdraw p1 p2 7) (grdraw p2 p3 7) (grdraw p3 p4 7) (grdraw p4 p1 7)
-  (if (and item_realcado (>= item_realcado 0))
-    (progn
+  (grdraw p1 p2 7)
+  (grdraw p2 p3 7)
+  (grdraw p3 p4 7)
+  (grdraw p4 p1 7)
+  (if (and item_realcado (>= item_realcado 0)) 
+    (progn 
       (setq start_y (- (cadr p1) (* item_height 1.5)))
       (setq texto_y (- start_y (* item_realcado item_height)))
       ;; Usa uma cor brilhante para o realce, como amarelo
-      (grdraw (list (car p1) (+ texto_y item_height)) (list (car p2) (+ texto_y item_height)) 2)
+      (grdraw (list (car p1) (+ texto_y item_height)) 
+              (list (car p2) (+ texto_y item_height))
+              2
+      )
       (grdraw (list (car p1) texto_y) (list (car p2) texto_y) 2)
     )
   )
 
   ;; --- 3. CRIA ENTIDADES DE TEXTO REAIS SOBRE O FUNDO ---
-  
+
   ;; Cria a entidade de Título
-  (entmake (list '(0 . "TEXT")
-                 (cons 10 (list (car p1) (+ (cadr p1) (* item_height 0.3)) 0))
-                 (cons 40 texto_size)
-                 (cons 1 (strcat " " titulo))
-                 '(7 . "STANDARD") ; Estilo de texto
-                 '(62 . 6) ; Cor (Magenta)
-           )
+  (entmake 
+    (list '(0 . "TEXT") 
+          (cons 10 (list (car p1) (+ (cadr p1) (* item_height 0.3)) 0))
+          (cons 40 texto_size)
+          (cons 1 (strcat " " titulo))
+          '(7 . "STANDARD") ; Estilo de texto
+          '(62 . 6) ; Cor (Magenta)
+    )
   )
   (setq entidades_menu (cons (entlast) entidades_menu))
 
@@ -2305,34 +2277,34 @@
   (setq i 0)
   (setq start_y (- (cadr p1) (* item_height 1.5)))
   (setq texto_x (+ (car p1) (* item_height 0.5)))
-  (foreach opcao opcoes
+  (foreach opcao opcoes 
     (setq texto_y (- start_y (* i item_height)))
     ;; O texto fica sempre branco, o fundo que muda (com grdraw)
     (setq cor 7)
-    
-    (entmake (list '(0 . "TEXT")
-                   (cons 10 (list texto_x texto_y 0))
-                   (cons 40 texto_size)
-                   (cons 1 (strcat " " opcao))
-                   '(7 . "STANDARD")
-                   (cons 62 cor)
-             )
+
+    (entmake 
+      (list '(0 . "TEXT") 
+            (cons 10 (list texto_x texto_y 0))
+            (cons 40 texto_size)
+            (cons 1 (strcat " " opcao))
+            '(7 . "STANDARD")
+            (cons 62 cor)
+      )
     )
     (setq entidades_menu (cons (entlast) entidades_menu))
     (setq i (1+ i))
   )
-  
+
   (reverse entidades_menu) ; Retorna a lista de todas as entidades criadas (fundo + textos)
 )
 
 
 ;;; --- Função Principal do Menu Gráfico ---
-(defun IAN:menu-grafico (titulo opcoes /
-                         view_center view_height box_width box_height half_width half_height
-                         p1 p2 p3 p4 item_height start_y i texto_y texto_x
-                         looping item_selecionado ultimo_item_realcado mouse_data codigo_input ponto_mouse
-                         entidades_menu_atual
-                        )
+(defun IAN:menu-grafico (titulo opcoes / view_center view_height box_width box_height 
+                         half_width half_height p1 p2 p3 p4 item_height start_y i 
+                         texto_y texto_x looping item_selecionado ultimo_item_realcado 
+                         mouse_data codigo_input ponto_mouse entidades_menu_atual
+                        ) 
   ;; --- 1. Calcular as Dimensões e Posição do Menu ---
   (setq view_center (getvar "VIEWCTR"))
   (setq view_height (getvar "VIEWSIZE"))
@@ -2343,60 +2315,86 @@
   (setq half_width (/ box_width 2.0))
   (setq half_height (/ box_height 2.0))
 
-  (setq p1 (list (- (car view_center) half_width) (+ (cadr view_center) half_height)))
-  (setq p2 (list (+ (car view_center) half_width) (+ (cadr view_center) half_height)))
-  (setq p3 (list (+ (car view_center) half_width) (- (cadr view_center) half_height)))
-  (setq p4 (list (- (car view_center) half_width) (- (cadr view_center) half_height)))
+  (setq p1 (list (- (car view_center) half_width) 
+                 (+ (cadr view_center) half_height)
+           )
+  )
+  (setq p2 (list (+ (car view_center) half_width) 
+                 (+ (cadr view_center) half_height)
+           )
+  )
+  (setq p3 (list (+ (car view_center) half_width) 
+                 (- (cadr view_center) half_height)
+           )
+  )
+  (setq p4 (list (- (car view_center) half_width) 
+                 (- (cadr view_center) half_height)
+           )
+  )
 
   ;; --- 2. Loop Principal de Interação ---
-  (setq looping T ultimo_item_realcado -1 entidades_menu_atual nil)
-  (while looping
+  (setq looping              T
+        ultimo_item_realcado -1
+        entidades_menu_atual nil
+  )
+  (while looping 
     ;; Apaga as entidades de texto antigas, se existirem
-    (if entidades_menu_atual
+    (if entidades_menu_atual 
       (foreach ent entidades_menu_atual (if (entget ent) (entdel ent)))
     )
     (redraw) ; Limpa os gráficos temporários (realce)
 
     ;; *** CORREÇÃO AQUI: Adicionados p3 e p4 à chamada da função de desenho ***
-    (setq entidades_menu_atual (IAN:desenhar-menu-grafico titulo opcoes p1 p2 p3 p4 item_height ultimo_item_realcado texto_size))
-    
+    (setq entidades_menu_atual (IAN:desenhar-menu-grafico titulo opcoes p1 p2 p3 p4 
+                                                          item_height ultimo_item_realcado texto_size
+                               )
+    )
+
     (setq mouse_data (grread T 15 0))
     (setq codigo_input (car mouse_data))
     (setq ponto_mouse (cadr mouse_data))
 
-    (cond
+    (cond 
       ((= codigo_input 5) ; Mouse moveu
-       (setq i 0 item_selecionado -1)
+       (setq i                0
+             item_selecionado -1
+       )
        (setq start_y (- (cadr p1) (* item_height 1.5)))
-       (while (and (< i (length opcoes)) (= item_selecionado -1))
+       (while (and (< i (length opcoes)) (= item_selecionado -1)) 
          (setq texto_y (- start_y (* i item_height)))
-         (if (and ponto_mouse
-                  (<= (car ponto_mouse) (car p2)) (>= (car ponto_mouse) (car p1))
-                  (<= (cadr ponto_mouse) (+ texto_y item_height)) (>= (cadr ponto_mouse) texto_y))
+         (if 
+           (and ponto_mouse 
+                (<= (car ponto_mouse) (car p2))
+                (>= (car ponto_mouse) (car p1))
+                (<= (cadr ponto_mouse) (+ texto_y item_height))
+                (>= (cadr ponto_mouse) texto_y)
+           )
            (setq item_selecionado i)
          )
          (setq i (1+ i))
        )
-       (if (/= item_selecionado ultimo_item_realcado)
+       (if (/= item_selecionado ultimo_item_realcado) 
          (setq ultimo_item_realcado item_selecionado)
        )
       )
       ((= codigo_input 3) ; Mouse clicou
-       (if (and ultimo_item_realcado (>= ultimo_item_realcado 0))
-         (progn
+       (if (and ultimo_item_realcado (>= ultimo_item_realcado 0)) 
+         (progn 
            (setq looping nil)
            (setq item_selecionado (nth ultimo_item_realcado opcoes))
          )
        )
       )
       ((= codigo_input 2) ; Tecla pressionada (ESC)
-       (setq looping nil item_selecionado nil)
+       (setq looping          nil
+             item_selecionado nil
+       )
       )
     )
   )
-  
+
   ;; Limpeza final: apaga as últimas entidades de texto criadas
-  (if entidades_menu_atual
+  (if entidades_menu_atual 
     (foreach ent entidades_menu_atual (if (entget ent) (entdel ent)))
   )
   (redraw)
@@ -2445,8 +2443,104 @@
 ;;; --- Funções de Construção Específicas (Placeholders) ---
 ;;; ------------------------------------------------------------------------
 
-(defun c:CONSTRUIR_MURO_TERRAMESH (/) 
-  (princ "\n(Lógica de construção para Terramesh vai aqui...)")
+;; --- Lógica para construir um Muro Terramesh ---
+(defun c:CONSTRUIR_MURO_TERRAMESH (/ ss_base_terramesh caminho_arquivo 
+                                   nome_bloco_terramesh ent_sel_data vla_bloco_modelo 
+                                   ss_entidades_subir ss_entidades_descer offset_h 
+                                   z_final
+                                  ) 
+  (princ "\n>>> INICIANDO CONSTRUCAO DE MURO TERRAMESH <<<")
+
+  (princ "\nSelecione a linha de base para o muro Terramesh:")
+  (setq ss_base_terramesh (ssget '((0 . "LINE,LWPOLYLINE"))))
+
+  (if ss_base_terramesh 
+    (progn 
+      ;; =================================================================
+      ;; --- PARTE 1: GERAR PONTOS (GPR) ---
+      ;; =================================================================
+      (setq caminho_arquivo (strcat (getvar "DWGPREFIX") "terramesh_pontos.txt"))
+      (princ (strcat "\nArquivo de saida sera salvo em: " caminho_arquivo))
+
+      (if (IAN:gerar-pontos-regua-core ss_base_terramesh 2.0 caminho_arquivo) 
+        (progn 
+          (princ "\nPontos do eixo Terramesh gerados com sucesso.")
+
+          ;; =================================================================
+          ;; --- PARTE 2: COLOCAR BLOCOS (CBPM) ---
+          ;; =================================================================
+          (setq nome_bloco_terramesh nil)
+          (while (not nome_bloco_terramesh) 
+            (setq ent_sel_data (entsel "\nSelecione o bloco modelo para o Terramesh: "))
+            (if ent_sel_data 
+              (if 
+                (= "AcDbBlockReference" 
+                   (vla-get-ObjectName 
+                     (setq vla_bloco_modelo (vlax-ename->vla-object (car ent_sel_data)))
+                   )
+                )
+                (setq nome_bloco_terramesh (vla-get-EffectiveName vla_bloco_modelo))
+                (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
+              )
+              (setq nome_bloco_terramesh "cancel")
+            )
+          )
+
+          (if (not (equal nome_bloco_terramesh "cancel")) 
+            (progn 
+              (princ (strcat "\nBloco selecionado: '" nome_bloco_terramesh "'."))
+              ;; Chama o "motor" do CBPM com o arquivo gerado e o bloco selecionado
+              (IAN:cbpm-core caminho_arquivo nome_bloco_terramesh)
+              (princ "\n\n--- Construcao de Muro Terramesh (Primeira Fiada) Concluida ---")
+              ;; =================================================================
+              ;; --- PARTE 3: CONSTRUIR CAMADAS SUPERIORES (CBE - SUBIR) ---
+              ;; =================================================================
+              (princ "\n\n--- Etapa de Subida ---")
+              (princ "\nSelecione os blocos e as linhas de apoio para SUBIR (ou pressione ENTER para pular):")
+              (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+              (if ss_entidades_subir 
+                (progn 
+                  (setq offset_h (getdist "\nDigite o offset horizontal para a subida: "))
+                  (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
+
+                  (if (and offset_h z_final) 
+                    (IAN:cbe-core ss_entidades_subir "Subir" offset_h 1.0 z_final)
+                    (princ "\nParâmetros para subida incompletos. Etapa pulada.")
+                  )
+                )
+                (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
+              )
+
+              ;; =================================================================
+              ;; --- PARTE 4: CONSTRUIR CAMADAS INFERIORES (CBE - DESCER) ---
+              ;; =================================================================
+              (princ "\n\n--- Etapa de Descida ---")
+              (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
+              (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+              (if ss_entidades_descer 
+                (progn 
+                  (setq offset_h (getdist "\nDigite o offset horizontal para a descida: "))
+                  (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
+
+                  (if (and offset_h z_final) 
+                    (IAN:cbe-core ss_entidades_descer "Descer" offset_h 1.0 z_final)
+                    (princ "\nParâmetros para descida incompletos. Etapa pulada.")
+                  )
+                )
+                (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+              )
+            )
+            (princ "\nSeleção de bloco cancelada.")
+          )
+        )
+        (princ "\nFalha ao gerar pontos para o Terramesh.")
+      )
+    )
+    (princ "\nNenhuma linha de base selecionada. Comando cancelado.")
+  )
+
   (princ)
 )
 
