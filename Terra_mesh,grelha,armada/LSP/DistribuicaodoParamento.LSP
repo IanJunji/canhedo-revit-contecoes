@@ -2309,7 +2309,10 @@
 (defun c:CONTENCOES (/ lista_de_tipos escolha) 
 
   ;; 1. Definir as opções do menu - *** STRINGS CORRIGIDAS SEM ACENTOS ***
-  (setq lista_de_tipos '("Terramesh" "Terra Armada" "Lock & Load" "Geogrelha"))
+  (setq lista_de_tipos '("Terramesh" "Terra Armada" "Lock & Load" "Geogrelha" 
+                         "StrataSlope" "Quadratum"
+                        )
+  )
 
   ;; 2. Chamar a função de menu gráfico - *** TÍTULO CORRIGIDO SEM ACENTOS ***
   (setq escolha (IAN:menu-grafico "Selecione o Tipo de Contencao" lista_de_tipos))
@@ -2331,6 +2334,12 @@
         )
         ((= escolha "Geogrelha")
          (c:CONSTRUIR_MURO_GEOGRELHA)
+        )
+        ((= escolha "StrataSlope")
+         (c:CONSTRUIR_MURO_STRATASLOPE)
+        )
+        ((= escolha "Quadratum")
+         (c:CONSTRUIR_MURO_QUADRATUM)
         )
       )
     )
@@ -2819,7 +2828,205 @@
   (princ)
 )
 
+;; --- Lógica para construir um Muro StrataSlope ---
+(defun c:CONSTRUIR_MURO_STRATASLOPE (/ *error* old_osmode old_cmdecho ss_base_ss 
+                                     caminho_arquivo nome_bloco_ss ent_sel_data 
+                                     vla_bloco_modelo first_block_created 
+                                     ss_entidades_subir ss_entidades_descer z_final
+                                    ) 
+  ;; --- Manipulador de Erro Local ---
+  (defun *error* (msg) 
+    (IAN:std-error 
+      msg
+      (function 
+        (lambda () 
+          (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+          (IAN:restore-osnap old_osmode)
+        )
+      )
+    )
+  )
 
+  ;; --- Inicialização ---
+  (setq old_cmdecho (getvar "CMDECHO"))
+  (setvar "CMDECHO" 0)
+  (setq old_osmode (IAN:disable-osnap))
+
+  (princ "\n>>> INICIANDO CONSTRUCAO DE MURO STRATASLOPE <<<")
+
+  ;; --- Etapa 1: Gerar Pontos (GPR) com régua de 1.0 ---
+  (princ "\nSelecione a linha de base para o muro:")
+  (setq ss_base_ss (ssget '((0 . "LINE,LWPOLYLINE"))))
+  (if (not ss_base_ss) 
+    (progn (princ "\nLinha de base não selecionada. Comando cancelado.") (exit))
+  )
+
+  (setq caminho_arquivo (strcat (getvar "DWGPREFIX") "strataslope_pontos.txt"))
+  (princ (strcat "\nArquivo de pontos será salvo em: " caminho_arquivo))
+
+  (if (not (IAN:gerar-pontos-regua-core ss_base_ss 1.0 caminho_arquivo)) 
+    (progn (princ "\nFalha ao gerar pontos para o StrataSlope. Comando cancelado.") 
+           (exit)
+    )
+  )
+  (princ "\nPontos do eixo gerados com sucesso.")
+
+  ;; --- Etapa 2: Colocar Blocos (CBPM) ---
+  (setq nome_bloco_ss nil)
+  (while (not nome_bloco_ss) 
+    (setq ent_sel_data (entsel "\nSelecione o bloco modelo STRATASLOPE: "))
+    (if ent_sel_data 
+      (if 
+        (= "AcDbBlockReference" 
+           (vla-get-ObjectName (setq vla_bloco_modelo (vlax-ename->vla-object (car ent_sel_data))))
+        )
+        (setq nome_bloco_ss (vla-get-EffectiveName vla_bloco_modelo))
+        (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
+      )
+      (progn (princ "\nSeleção de bloco cancelada.") (exit))
+    )
+  )
+  (setq first_block_created (IAN:cbpm-core caminho_arquivo nome_bloco_ss))
+  (princ "\n\n--- Primeira fiada de blocos StrataSlope criada. ---")
+
+  ;; --- Etapa 3: Alternar Altura (ABS-Core) com altura de 0.5 ---
+  (if (not first_block_created) 
+    (progn (princ "\nNenhum bloco foi criado na etapa anterior. Cancelando.") 
+           (exit)
+    )
+  )
+  (IAN:abs-core first_block_created 0.5)
+  (princ "\n\n--- Altura da primeira fiada alternada automaticamente. ---")
+
+  ;; =================================================================
+  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CBE) ---
+  ;; =================================================================
+
+  ;; --- Etapa de Subida ---
+  (princ "\n\n--- Etapa de Subida ---")
+  (princ "\nSelecione os blocos e linhas de apoio para SUBIR (ou pressione ENTER para pular):")
+  (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+  (if ss_entidades_subir 
+    (progn 
+      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
+      (if z_final 
+        (IAN:cbe-core ss_entidades_subir "Subir" 0.05 0.5 z_final)
+        (princ "\nZ Final não informado. Etapa pulada.")
+      )
+    )
+    (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
+  )
+
+  ;; --- Etapa de Descida ---
+  (princ "\n\n--- Etapa de Descida ---")
+  (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
+  (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+  (if ss_entidades_descer 
+    (progn 
+      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
+      (if z_final 
+        (IAN:cbe-core ss_entidades_descer "Descer" 0.05 0.5 z_final)
+        (princ "\nZ Final não informado. Etapa pulada.")
+      )
+    )
+    (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+  )
+
+  ;; --- Finalização ---
+  (princ "\n\n>>> Construção de Muro StrataSlope concluída! <<<")
+  (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
+  (princ)
+)
+
+;; --- Lógica para construir um Muro Quadratum ---
+(defun c:CONSTRUIR_MURO_QUADRATUM (/ 
+                                   *error* old_osmode old_cmdecho
+                                   ss_base_quad caminho_arquivo
+                                   nome_bloco_quad ent_sel_data vla_bloco_modelo
+                                   ss_entidades_subir ss_entidades_descer z_final
+                                  )
+  ;; --- Manipulador de Erro Local ---
+  (defun *error* (msg) (IAN:std-error msg (function (lambda () (if old_cmdecho (setvar "CMDECHO" old_cmdecho)) (IAN:restore-osnap old_osmode)))))
+
+  ;; --- Inicialização ---
+  (setq old_cmdecho (getvar "CMDECHO")) (setvar "CMDECHO" 0)
+  (setq old_osmode (IAN:disable-osnap))
+
+  (princ "\n>>> INICIANDO CONSTRUCAO DE MURO QUADRATUM <<<")
+
+  ;; --- Etapa 1: Gerar Pontos (GPR) com régua de 2.5 ---
+  (princ "\nSelecione a linha de base para o muro:")
+  (setq ss_base_quad (ssget '((0 . "LINE,LWPOLYLINE"))))
+  (if (not ss_base_quad) (progn (princ "\nLinha de base não selecionada. Comando cancelado.") (exit)))
+
+  (setq caminho_arquivo (strcat (getvar "DWGPREFIX") "quadratum_pontos.txt"))
+  (princ (strcat "\nArquivo de pontos será salvo em: " caminho_arquivo))
+  
+  (if (not (IAN:gerar-pontos-regua-core ss_base_quad 2.5 caminho_arquivo))
+    (progn (princ "\nFalha ao gerar pontos para o Quadratum. Comando cancelado.") (exit))
+  )
+  (princ "\nPontos do eixo gerados com sucesso.")
+
+  ;; --- Etapa 2: Colocar Blocos (CBPM) ---
+  (setq nome_bloco_quad nil)
+  (while (not nome_bloco_quad)
+    (setq ent_sel_data (entsel "\nSelecione o bloco modelo QUADRATUM: "))
+    (if ent_sel_data
+      (if (= "AcDbBlockReference" (vla-get-ObjectName (setq vla_bloco_modelo (vlax-ename->vla-object (car ent_sel_data)))))
+        (setq nome_bloco_quad (vla-get-EffectiveName vla_bloco_modelo))
+        (princ "\nSeleção inválida. A entidade não é um bloco. Tente novamente.")
+      )
+      (progn (princ "\nSeleção de bloco cancelada.") (exit))
+    )
+  )
+  (IAN:cbpm-core caminho_arquivo nome_bloco_quad)
+  (princ "\n\n--- Primeira fiada de blocos Quadratum criada. ---")
+  
+  ;; =================================================================
+  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CBE) ---
+  ;; =================================================================
+  
+  ;; --- Etapa de Subida ---
+  (princ "\n\n--- Etapa de Subida ---")
+  (princ "\nSelecione os blocos e linhas de apoio para SUBIR (ou pressione ENTER para pular):")
+  (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+  
+  (if ss_entidades_subir
+    (progn
+      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
+      (if z_final
+        (IAN:cbe-core ss_entidades_subir "Subir" 0.12 0.6 z_final)
+        (princ "\nZ Final não informado. Etapa pulada.")
+      )
+    )
+    (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
+  )
+
+  ;; --- Etapa de Descida ---
+  (princ "\n\n--- Etapa de Descida ---")
+  (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
+  (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+
+  (if ss_entidades_descer
+    (progn
+      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
+      (if z_final
+        (IAN:cbe-core ss_entidades_descer "Descer" 0.12 0.6 z_final)
+        (princ "\nZ Final não informado. Etapa pulada.")
+      )
+    )
+    (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+  )
+
+  ;; --- Finalização ---
+  (princ "\n\n>>> Construção de Muro Quadratum concluída! <<<")
+  (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
+  (princ)
+)
 
 ;;;; ----------------------------------------------------------------------;;;;
 ;;; Mensagem de Carregamento Final                                         ;;;
