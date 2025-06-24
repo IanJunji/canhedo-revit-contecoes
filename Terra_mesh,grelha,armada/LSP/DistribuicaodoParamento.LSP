@@ -1937,6 +1937,175 @@
 (defun c:DELBLOCINV () (c:APAGAR_BLOCOS_INTERCALADOS_INVERSO))
 
 
+
+
+
+
+;;; --- FUNÇÃO DE AGRUPAMENTO (LÓGICA DIRETA DO USUÁRIO) ---
+(defun IAN:agrupar-blocos-logica-direta (ss_todos_os_blocos / 
+                                        lista_completa lista_colunas i mspace raio_de_toque
+                                        bloco_A bloco_B esfera_temp tocou_em_alguem
+                                        coluna_de_A coluna_de_B nova_coluna coluna_mesclada
+                                       )
+  (princ "\nIniciando agrupamento (Sua Lógica)...")
+  (setq mspace (vla-get-ModelSpace (vla-get-ActiveDocument (vlax-get-acad-object))))
+  
+  ;; Prepara as listas iniciais
+  (setq lista_completa nil i 0)
+  (while (< i (sslength ss_todos_os_blocos))
+    (setq lista_completa (cons (vlax-ename->vla-object (ssname ss_todos_os_blocos i)) lista_completa))
+    (setq i (1+ i))
+  )
+  (setq lista_colunas nil)
+  (setq raio_de_toque 0.3)
+
+  ;; --- for bloco in lista completa: ---
+  (foreach bloco_A lista_completa
+    (princ ".") ; Mostra o progresso, pois este loop pode ser lento
+    (setq esfera_temp (vla-AddCircle mspace (vlax-3d-point (IAN:abs-get-insertion-point-list bloco_A)) raio_de_toque))
+    (setq tocou_em_alguem nil)
+
+    ;; Verifica o bloco_A contra todos os outros
+    (foreach bloco_B lista_completa
+      (if (not (eq bloco_A bloco_B)) ; Não testa contra si mesmo
+        (progn
+          ;; --- verificar if encostou em um outro bloco: ---
+          (if (> (vlax-safearray-get-u-bound (vlax-variant-value (vla-IntersectWith esfera_temp bloco_B acExtendNone)) 1) -1)
+            (progn
+              (setq tocou_em_alguem T)
+              
+              ;; --- verificar se o blocoA ou o blocoB estao em alguma lista ---
+              (setq coluna_de_A (car (vl-member-if (function (lambda (col) (member bloco_A col))) lista_colunas)))
+              (setq coluna_de_B (car (vl-member-if (function (lambda (col) (member bloco_B col))) lista_colunas)))
+              
+              (cond
+                ;; --- se nenhum dos dois estiver: ---
+                ((and (not coluna_de_A) (not coluna_de_B))
+                 (setq nova_coluna (list bloco_A bloco_B))
+                 (setq lista_colunas (cons nova_coluna lista_colunas))
+                )
+                ;; --- se algum dos dois estiver: (A está, B não está) ---
+                ((and coluna_de_A (not coluna_de_B))
+                 (setq nova_coluna (cons bloco_B coluna_de_A))
+                 (setq lista_colunas (subst nova_coluna coluna_de_A lista_colunas))
+                )
+                ;; --- se algum dos dois estiver: (B está, A não está) ---
+                ((and (not coluna_de_A) coluna_de_B)
+                 (setq nova_coluna (cons bloco_A coluna_de_B))
+                 (setq lista_colunas (subst nova_coluna coluna_de_B lista_colunas))
+                )
+                ;; --- se os dois estiverem em alguma lista (mas em listas diferentes) ---
+                ((and coluna_de_A coluna_de_B (not (eq coluna_de_A coluna_de_B)))
+                  ;; Junta as duas colunas
+                  (setq coluna_mesclada (append coluna_de_A coluna_de_B))
+                  ;; Remove a coluna B e substitui a A pela mesclada
+                  (setq lista_colunas (vl-remove coluna_de_B lista_colunas))
+                  (setq lista_colunas (subst coluna_mesclada coluna_de_A lista_colunas))
+                )
+                ;; se os dois já estiverem na mesma lista, não faz nada (condição implícita)
+              )
+            )
+          )
+        )
+      )
+    )
+    (vla-delete esfera_temp)
+
+    ;; --- se nao encostou em nenhum bloco: ---
+    (if (not tocou_em_alguem)
+      (progn
+        ;; --- verificar se o blocoA esta em alguma lista ---
+        (if (not (car (vl-member-if (function (lambda (col) (member bloco_A col))) lista_colunas)))
+          ;; --- se nao estiver: criar uma lista com o blocoA ---
+          (setq lista_colunas (cons (list bloco_A) lista_colunas))
+        )
+      )
+    )
+  )
+  (princ "\nAgrupamento concluído.")
+  lista_colunas
+)
+
+
+;;; --- NOVO COMANDO DE SUBSTITUIÇÃO (USA LÓGICA DIRETA) ---
+(defun c:SUBSTITUIR_BASE_LOGICA_DIRETA (/ *error* old_cmdecho old_osmode mspace
+                                          ent_meio_bloco nome_meio_bloco porcentagem ss_alvo
+                                          colunas_agrupadas total_substituidos
+                                          coluna coluna_ordenada qnt_a_substituir i
+                                          bloco_a_trocar pt rot layer
+                                         )
+  (defun *error* (msg) (IAN:std-error msg (lambda () (if old_cmdecho (setvar "CMDECHO" old_cmdecho)) (IAN:restore-osnap old_osmode))))
+  (setq old_cmdecho (getvar "CMDECHO")) (setvar "CMDECHO" 0)
+  (setq old_osmode (IAN:disable-osnap))
+  (setq mspace (vla-get-ModelSpace (vla-get-ActiveDocument (vlax-get-acad-object))))
+
+  (princ "\n>>> Substituir Base (Lógica Direta) <<<")
+
+  ;; 1. Pede as Entradas do Usuário
+  (setq ent_meio_bloco (car (entsel "\nSelecione o MEIO-BLOCO modelo: ")))
+  (if (or (null ent_meio_bloco) (/= (cdr (assoc 0 (entget ent_meio_bloco))) "INSERT"))
+      (progn (princ "\nSeleção inválida ou não é um bloco. Comando cancelado.") (exit)))
+  (setq nome_meio_bloco (vla-get-EffectiveName (vlax-ename->vla-object ent_meio_bloco)))
+  
+  (setq porcentagem (getreal "\nDigite a porcentagem da base a ser substituída (ex: 30): "))
+  (if (or (null porcentagem) (<= porcentagem 0) (> porcentagem 100))
+      (progn (princ "\nPorcentagem inválida. Comando cancelado.") (exit)))
+
+  (princ "\nSelecione TODOS os blocos da contenção:")
+  (setq ss_alvo (ssget '((0 . "INSERT"))))
+  (if (not ss_alvo) (progn (princ "\nNenhum bloco selecionado. Comando cancelado.") (exit)))
+  
+  ;; 2. Agrupa os blocos em colunas usando a SUA lógica
+  (setq colunas_agrupadas (IAN:agrupar-blocos-logica-direta ss_alvo))
+  
+  ;; 3. Processa cada coluna encontrada
+  (setq total_substituidos 0)
+  (princ "\nIniciando substituição...")
+  (foreach coluna colunas_agrupadas
+    (setq coluna_ordenada 
+          (vl-sort coluna 
+                   (function (lambda (a b) 
+                               (< (caddr (IAN:abs-get-insertion-point-list a))
+                                  (caddr (IAN:abs-get-insertion-point-list b))
+                               )
+                             )
+                   )
+          )
+    )
+    
+    (setq qnt_a_substituir (fix (+ 0.99999 (* (length coluna_ordenada) (/ porcentagem 100.0)))))
+    (princ (strcat "\nProcessando coluna de " (itoa (length coluna_ordenada)) " blocos. Trocando " (itoa qnt_a_substituir) "."))
+
+    (setq i 0)
+    (while (< i qnt_a_substituir)
+      (setq bloco_a_trocar (nth i coluna_ordenada))
+      (setq pt (IAN:abs-get-insertion-point-list bloco_a_trocar))
+      (setq rot (vla-get-Rotation bloco_a_trocar))
+      (setq layer (vla-get-Layer bloco_a_trocar))
+      
+      (if (not (vl-catch-all-error-p (vla-Delete bloco_a_trocar)))
+        (progn
+          (vla-InsertBlock mspace (vlax-3d-point pt) nome_meio_bloco 1.0 1.0 1.0 rot)
+          (vla-put-Layer (vlax-ename->vla-object (entlast)) layer)
+          (setq total_substituidos (1+ total_substituidos))
+        )
+      )
+      (setq i (1+ i))
+    )
+  )
+  
+  (princ (strcat "\n\nSubstituição concluída! " (itoa total_substituidos) " blocos foram trocados."))
+  (setvar "CMDECHO" old_cmdecho)
+  (IAN:restore-osnap old_osmode)
+  (princ)
+)
+
+(defun c:SBLD () (c:SUBSTITUIR_BASE_LOGICA_DIRETA)) ; Alias curto SBLD
+
+
+
+
+
 ;;;; ----------------------------------------------------------------------;;;;
 ;;;                                                                        ;;;
 ;;;   COMANDO: EXPORTAR DADOS DE BLOCOS (X,Y,Z,Ângulo) (EXDBLK)            ;;;
