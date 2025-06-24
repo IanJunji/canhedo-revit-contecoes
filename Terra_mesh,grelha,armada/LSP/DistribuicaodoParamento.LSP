@@ -930,66 +930,31 @@
 ;;;            com offsets horizontais e verticais definidos pelo usuário. ;;;
 ;;;-----------------------------------------------------------------------------
 
-;;; --- Função Auxiliar para CBE: Lógica do Modo ZIG-ZAG ---
-(defun IAN:cbe-executar-zigzag (blocos_na_base blocos_deslocados mspace 
-                                direcao_escada_str offset_h alt_v z_final / 
-                                direcao_escada_str direcao_sinal_z offset_h alt_v 
-                                z_final total_blocos_movidos total_blocos_criados 
-                                ; Vars para mover blocos deslocados
-                                bloco_a_mover pt_atual_bloco rot_bloco 
-                                angulo_direcao_offset_h offset_vetor_unit_x 
-                                offset_vetor_unit_y novo_ponto_movido 
-                                ; Vars para criar novas camadas a partir da lista unificada
-                                lista_unificada vla_bloco_base pt_base_list rot_base 
-                                nome_base layer_bloco_original z_atual_bloco 
-                                delta_z_total qnt_novas_camadas 
-                                blocos_criados_nesta_base n offset_h_acum novo_x 
-                                novo_y novo_z ponto_insercao_nova_camada 
-                                vla_bloco_copiado
+;;; --- Função Auxiliar para CBE: Lógica do Modo ZIG-ZAG (MODIFICADA) ---
+(defun IAN:cbe-executar-zigzag (blocos_na_base blocos_deslocados mspace lista_linhas_perfil offset_h alt_v / 
+                                direcao_escada_str direcao_sinal_z total_blocos_movidos total_blocos_criados 
+                                bloco_a_mover pt_atual_bloco rot_bloco angulo_direcao_offset_h offset_vetor_unit_x 
+                                offset_vetor_unit_y novo_ponto_movido lista_unificada vla_bloco_base pt_base_list 
+                                rot_base nome_base layer_bloco_original z_atual_bloco delta_z_total z_final_local
+                                qnt_novas_camadas blocos_criados_nesta_base n offset_h_acum novo_x novo_y novo_z 
+                                ponto_insercao_nova_camada vla_bloco_copiado
                                ) 
   (princ "\nExecutando modo ZIG-ZAG...")
-  (setq direcao_sinal_z (if (eq direcao_escada_str "Subir") 1.0 -1.0))
+  
+  (setq total_blocos_movidos 0 total_blocos_criados 0)
 
-  (setq total_blocos_movidos 0)
-  (setq total_blocos_criados 0)
-
-  ;; --- Parte 1: Ajustar o recuo dos blocos já deslocados (flutuantes) ---
+  ;; Ajuste do recuo (sem alterações aqui)
   (if blocos_deslocados 
     (progn 
-      (princ 
-        (strcat "\nProcessando " 
-                (itoa (length blocos_deslocados))
-                " bloco(s) deslocado(s) (aplicando recuo horizontal)..."
-        )
-      )
+      (princ (strcat "\nProcessando " (itoa (length blocos_deslocados)) " bloco(s) deslocado(s) (aplicando recuo horizontal)..."))
       (foreach bloco_a_mover blocos_deslocados 
         (setq pt_atual_bloco (IAN:abs-get-insertion-point-list bloco_a_mover))
         (setq rot_bloco (vla-get-Rotation bloco_a_mover))
-
         (setq angulo_direcao_offset_h (+ rot_bloco (/ PI 2.0)))
-
         (setq offset_vetor_unit_x (cos angulo_direcao_offset_h))
         (setq offset_vetor_unit_y (sin angulo_direcao_offset_h))
-        (setq novo_ponto_movido (list 
-                                  (+ (car pt_atual_bloco) 
-                                     (* offset_h offset_vetor_unit_x)
-                                  )
-                                  (+ (cadr pt_atual_bloco) 
-                                     (* offset_h offset_vetor_unit_y)
-                                  )
-                                  (caddr pt_atual_bloco)
-                                )
-        )
-        (if 
-          (not 
-            (vl-catch-all-error-p 
-              (vl-catch-all-apply 'vla-put-InsertionPoint 
-                                  (list bloco_a_mover 
-                                        (vlax-3d-point novo_ponto_movido)
-                                  )
-              )
-            )
-          )
+        (setq novo_ponto_movido (list (+ (car pt_atual_bloco) (* offset_h offset_vetor_unit_x)) (+ (cadr pt_atual_bloco) (* offset_h offset_vetor_unit_y)) (caddr pt_atual_bloco)))
+        (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-put-InsertionPoint (list bloco_a_mover (vlax-3d-point novo_ponto_movido)))))
           (setq total_blocos_movidos (1+ total_blocos_movidos))
         )
         (princ ".")
@@ -997,103 +962,60 @@
     )
   )
 
-  ;; --- Parte 2: Unificar todas as bases e criar novas camadas ---
   (setq lista_unificada (append blocos_na_base blocos_deslocados))
-
   (if lista_unificada 
     (progn 
-      (princ 
-        (strcat "\nProcessando " 
-                (itoa (length lista_unificada))
-                " blocos totais na fundação (criando camadas subsequentes)..."
-        )
-      )
+      (princ (strcat "\nProcessando " (itoa (length lista_unificada)) " blocos totais na fundação (criando camadas subsequentes)..."))
       (foreach vla_bloco_base lista_unificada 
         (setq pt_base_list (IAN:abs-get-insertion-point-list vla_bloco_base))
         (setq rot_base (vla-get-Rotation vla_bloco_base))
         (setq nome_base (vla-get-EffectiveName vla_bloco_base))
         (setq layer_bloco_original (vla-get-Layer vla_bloco_base))
-        (setq z_atual_bloco (caddr pt_base_list))
-        (setq blocos_criados_nesta_base 0)
+        (setq z_atual_bloco (caddr pt_base_list) blocos_criados_nesta_base 0 qnt_novas_camadas 0)
 
-        (setq delta_z_total (- z_final z_atual_bloco))
-        (if (eq direcao_escada_str "Subir") 
-          (if (<= delta_z_total 0) 
-            (setq qnt_novas_camadas 0)
-            (setq qnt_novas_camadas (fix (/ delta_z_total (* 2.0 alt_v))))
+        ;; --- INÍCIO DA MUDANÇA ---
+        (setq z_final_local (IAN:cbe-get-target-z-for-block vla_bloco_base lista_linhas_perfil))
+        (if z_final_local
+          (progn
+            (setq delta_z_total (- z_final_local z_atual_bloco))
+            (setq direcao_escada_str (if (>= delta_z_total 0) "Subir" "Descer"))
+            (setq direcao_sinal_z (if (eq direcao_escada_str "Subir") 1.0 -1.0))
+            (if (> (abs delta_z_total) (* (* 2.0 alt_v) 0.1))
+              (setq qnt_novas_camadas (fix (/ (abs delta_z_total) (* 2.0 alt_v))))
+            )
           )
-          (if (>= delta_z_total 0) 
-            (setq qnt_novas_camadas 0)
-            (setq qnt_novas_camadas (fix (/ (abs delta_z_total) (* 2.0 alt_v))))
-          )
+          (princ (strcat "\n  [AVISO] Bloco (Handle: " (vla-get-Handle vla_bloco_base) ") não encontrou perfil de topo. Ignorando."))
         )
+        ;; --- FIM DA MUDANÇA ---
 
         (if (> qnt_novas_camadas 0) 
           (progn 
-            (setq angulo_direcao_offset_h (if (eq direcao_escada_str "Subir") 
-                                            (+ rot_base (/ PI 2.0))
-                                            (- rot_base (/ PI 2.0))
-                                          )
-            )
+            (setq angulo_direcao_offset_h (if (eq direcao_escada_str "Subir") (+ rot_base (/ PI 2.0)) (- rot_base (/ PI 2.0))))
             (setq offset_vetor_unit_x (cos angulo_direcao_offset_h))
             (setq offset_vetor_unit_y (sin angulo_direcao_offset_h))
             (setq n 1)
             (while (<= n qnt_novas_camadas) 
               (setq offset_h_acum (* n (* 2.0 offset_h)))
-              (setq novo_x (+ (car pt_base_list) 
-                              (* offset_h_acum offset_vetor_unit_x)
-                           )
-              )
-              (setq novo_y (+ (cadr pt_base_list) 
-                              (* offset_h_acum offset_vetor_unit_y)
-                           )
-              )
+              (setq novo_x (+ (car pt_base_list) (* offset_h_acum offset_vetor_unit_x)))
+              (setq novo_y (+ (cadr pt_base_list) (* offset_h_acum offset_vetor_unit_y)))
               (setq novo_z (+ z_atual_bloco (* n direcao_sinal_z (* 2.0 alt_v))))
               (setq ponto_insercao_nova_camada (list novo_x novo_y novo_z))
-              (setq vla_bloco_copiado (vl-catch-all-apply 'vla-InsertBlock 
-                                                          (list mspace 
-                                                                (vlax-3d-point ponto_insercao_nova_camada)
-                                                                nome_base
-                                                                1.0
-                                                                1.0
-                                                                1.0
-                                                                rot_base
-                                                          )
-                                      )
-              )
-
+              (setq vla_bloco_copiado (vl-catch-all-apply 'vla-InsertBlock (list mspace (vlax-3d-point ponto_insercao_nova_camada) nome_base 1.0 1.0 1.0 rot_base)))
               (if (not (vl-catch-all-error-p vla_bloco_copiado)) 
                 (progn 
                   (vla-put-Layer vla_bloco_copiado layer_bloco_original)
-                  (setq total_blocos_criados (1+ total_blocos_criados))
-                  (setq blocos_criados_nesta_base (1+ blocos_criados_nesta_base))
+                  (setq total_blocos_criados (1+ total_blocos_criados) blocos_criados_nesta_base (1+ blocos_criados_nesta_base))
                 )
-                (princ 
-                  (strcat "\n    [CBE ERRO] Falha ao inserir bloco '" 
-                          nome_base
-                          "' na camada "
-                          (itoa n)
-                          ". Erro: "
-                          (vl-catch-all-error-message vla_bloco_copiado)
-                  )
-                )
+                (princ (strcat "\n    [CBE ERRO] Falha ao inserir bloco '" nome_base "' na camada " (itoa n) ". Erro: " (vl-catch-all-error-message vla_bloco_copiado)))
               )
               (setq n (1+ n))
             )
-            (if (> blocos_criados_nesta_base 0) 
-              (princ 
-                (strcat " -> " 
-                        (itoa blocos_criados_nesta_base)
-                        " blocos adicionados."
-                )
-              )
-            )
+            (if (> blocos_criados_nesta_base 0) (princ (strcat " -> " (itoa blocos_criados_nesta_base) " blocos adicionados.")))
           )
         )
       )
     )
   )
-  ;; --- Feedback Final do Modo ZIG-ZAG ---
   (princ "\n--- Resumo do Modo ZIG-ZAG ---")
   (princ (strcat "\nBlocos deslocados ajustados: " (itoa total_blocos_movidos)))
   (princ (strcat "\nNovos blocos criados: " (itoa total_blocos_criados)))
@@ -1152,15 +1074,13 @@
   (list (reverse blocos_na_base) (reverse blocos_deslocados))
 )
 
-;;; --- Função Auxiliar para CBE: Lógica do Modo Escadinha Simples ---
-(defun IAN:cbe-executar-escadinha-simples (blocos_na_base mspace direcao_escada_str 
-                                           offset_h alt_v z_final / 
+;;; --- Função Auxiliar para CBE: Lógica do Modo Escadinha Simples (MODIFICADA) ---
+(defun IAN:cbe-executar-escadinha-simples (blocos_na_base mspace lista_linhas_perfil offset_h alt_v / 
                                            bloco_base_process_list vla_bloco_base 
                                            pt_base_list rot_base nome_base 
                                            layer_bloco_original direcao_escada_str 
-                                           direcao_sinal_z offset_h alt_v z_final 
-                                           total_blocos_criados bloco_info 
-                                           z_atual_bloco delta_z_total 
+                                           direcao_sinal_z total_blocos_criados bloco_info 
+                                           z_atual_bloco delta_z_total z_final_local
                                            qnt_novas_camadas blocos_criados_nesta_base 
                                            angulo_direcao_offset_h offset_vetor_unit_x 
                                            offset_vetor_unit_y n offset_h_acum novo_x 
@@ -1168,249 +1088,253 @@
                                            vla_bloco_copiado
                                           ) 
   (princ "\nModo: Escadinha Simples. Todos os blocos estão na base.")
-  (setq direcao_sinal_z (if (eq direcao_escada_str "Subir") 1.0 -1.0))
 
-  ;; Prepara a lista de blocos no formato esperado pela lógica de processamento
+  ;; Prepara a lista de blocos (sem alterações aqui)
   (setq bloco_base_process_list nil)
   (foreach vla_bloco_base blocos_na_base 
     (setq pt_base_list (IAN:abs-get-insertion-point-list vla_bloco_base))
-    (setq rot_base (vlax-get-property vla_bloco_base 'Rotation))
+    (setq rot_base (vla-get-Rotation vla_bloco_base))
     (setq nome_base (vla-get-EffectiveName vla_bloco_base))
     (setq layer_bloco_original (vla-get-Layer vla_bloco_base))
-    (setq bloco_base_process_list (cons 
-                                    (list vla_bloco_base pt_base_list rot_base 
-                                          nome_base layer_bloco_original
-                                    )
-                                    bloco_base_process_list
-                                  )
-    )
+    (setq bloco_base_process_list (cons (list vla_bloco_base pt_base_list rot_base nome_base layer_bloco_original) bloco_base_process_list))
   )
   (setq bloco_base_process_list (reverse bloco_base_process_list))
 
-  ;; --- Processamento ---
   (setq total_blocos_criados 0)
   (princ "\nCriando camadas em escadinha...")
   (foreach bloco_info bloco_base_process_list 
-    (setq vla_bloco_base       (nth 0 bloco_info)
-          pt_base_list         (nth 1 bloco_info)
-          rot_base             (nth 2 bloco_info)
-          nome_base            (nth 3 bloco_info)
-          layer_bloco_original (nth 4 bloco_info)
+    (setq vla_bloco_base (nth 0 bloco_info) pt_base_list (nth 1 bloco_info) rot_base (nth 2 bloco_info)
+          nome_base (nth 3 bloco_info) layer_bloco_original (nth 4 bloco_info)
     )
-    (setq z_atual_bloco             (caddr pt_base_list)
-          blocos_criados_nesta_base 0
-    )
-    (setq delta_z_total (- z_final z_atual_bloco))
-    (if (eq direcao_escada_str "Subir") 
-      (if (<= delta_z_total 0) 
-        (setq qnt_novas_camadas 0)
-        (setq qnt_novas_camadas (fix (/ delta_z_total alt_v)))
+    (setq z_atual_bloco (caddr pt_base_list) blocos_criados_nesta_base 0 qnt_novas_camadas 0)
+
+    ;; --- INÍCIO DA MUDANÇA ---
+    ;; Chama a função "GPS" para obter o Z-alvo LOCAL para este bloco
+    (setq z_final_local (IAN:cbe-get-target-z-for-block vla_bloco_base lista_linhas_perfil))
+
+    (if z_final_local
+      (progn
+        (setq delta_z_total (- z_final_local z_atual_bloco))
+        (setq direcao_escada_str (if (>= delta_z_total 0) "Subir" "Descer"))
+        (setq direcao_sinal_z (if (eq direcao_escada_str "Subir") 1.0 -1.0))
+        (if (> (abs delta_z_total) (* alt_v 0.1))
+          (setq qnt_novas_camadas (fix (/ (abs delta_z_total) alt_v)))
+        )
       )
-      (if (>= delta_z_total 0) 
-        (setq qnt_novas_camadas 0)
-        (setq qnt_novas_camadas (fix (/ (abs delta_z_total) alt_v)))
-      )
+      (princ (strcat "\n  [AVISO] Bloco (Handle: " (vla-get-Handle vla_bloco_base) ") não encontrou perfil de topo. Ignorando."))
     )
+    ;; --- FIM DA MUDANÇA ---
+
     (if (> qnt_novas_camadas 0) 
       (progn 
-        (princ 
-          (strcat "\n  Processando bloco base (Handle: " 
-                  (vla-get-Handle vla_bloco_base)
-                  "), criando "
-                  (itoa qnt_novas_camadas)
-                  " camada(s)..."
-          )
-        )
-        (setq angulo_direcao_offset_h (if (eq direcao_escada_str "Subir") 
-                                        (+ rot_base (/ PI 2.0)) ; Se for "Subir", mantém como estava
-                                        (- rot_base (/ PI 2.0)) ; Se for "Descer", inverte o lado
-                                      )
-        )
-        (setq offset_vetor_unit_x (cos angulo_direcao_offset_h)
-              offset_vetor_unit_y (sin angulo_direcao_offset_h)
-        )
+        (princ (strcat "\n  Processando bloco (Handle: " (vla-get-Handle vla_bloco_base) "), criando " (itoa qnt_novas_camadas) " camada(s)..."))
+        (setq angulo_direcao_offset_h (if (eq direcao_escada_str "Subir") (+ rot_base (/ PI 2.0)) (- rot_base (/ PI 2.0))))
+        (setq offset_vetor_unit_x (cos angulo_direcao_offset_h) offset_vetor_unit_y (sin angulo_direcao_offset_h))
         (setq n 1)
         (while (<= n qnt_novas_camadas) 
           (setq offset_h_acum (* n offset_h))
           (setq novo_x (+ (car pt_base_list) (* offset_h_acum offset_vetor_unit_x)))
-          (setq novo_y (+ (cadr pt_base_list) 
-                          (* offset_h_acum offset_vetor_unit_y)
-                       )
-          )
+          (setq novo_y (+ (cadr pt_base_list) (* offset_h_acum offset_vetor_unit_y)))
           (setq novo_z (+ z_atual_bloco (* n direcao_sinal_z alt_v)))
           (setq ponto_insercao_nova_camada (list novo_x novo_y novo_z))
-          (setq vla_bloco_copiado (vl-catch-all-apply 'vla-InsertBlock 
-                                                      (list mspace 
-                                                            (vlax-3d-point ponto_insercao_nova_camada)
-                                                            nome_base
-                                                            1.0
-                                                            1.0
-                                                            1.0
-                                                            rot_base
-                                                      )
-                                  )
-          )
-
-          ;; *** ERRO CORRIGIDO AQUI ***
+          (setq vla_bloco_copiado (vl-catch-all-apply 'vla-InsertBlock (list mspace (vlax-3d-point ponto_insercao_nova_camada) nome_base 1.0 1.0 1.0 rot_base)))
           (if (not (vl-catch-all-error-p vla_bloco_copiado)) 
-            (progn  ; Cláusula 'then'
+            (progn
                    (vla-put-Layer vla_bloco_copiado layer_bloco_original)
-                   (setq total_blocos_criados (1+ total_blocos_criados))
-                   (setq blocos_criados_nesta_base (1+ blocos_criados_nesta_base))
+                   (setq total_blocos_criados (1+ total_blocos_criados) blocos_criados_nesta_base (1+ blocos_criados_nesta_base))
                    (princ ".")
             )
-            (princ  ; Cláusula 'else'
-                   (strcat "\n    [CBE ERRO] Falha ao inserir bloco '" 
-                           nome_base
-                           "' na camada "
-                           (itoa n)
-                           ". Erro: "
-                           (vl-catch-all-error-message vla_bloco_copiado)
-                   )
-            )
+            (princ (strcat "\n    [CBE ERRO] Falha ao inserir bloco '" nome_base "' na camada " (itoa n) ". Erro: " (vl-catch-all-error-message vla_bloco_copiado)))
           )
           (setq n (1+ n))
         )
-        (if (> blocos_criados_nesta_base 0) 
-          (princ 
-            (strcat " " (itoa blocos_criados_nesta_base) " blocos adicionados.")
-          )
-        )
+        (if (> blocos_criados_nesta_base 0) (princ (strcat " " (itoa blocos_criados_nesta_base) " blocos adicionados.")))
       )
     )
   )
   (if (> total_blocos_criados 0) 
-    (princ 
-      (strcat "\nSucesso! " 
-              (itoa total_blocos_criados)
-              " novo(s) bloco(s) criado(s)."
-      )
-    )
+    (princ (strcat "\nSucesso! " (itoa total_blocos_criados) " novo(s) bloco(s) criado(s)."))
     (princ "\nNenhum novo bloco foi criado.")
   )
 )
 
+;;; --- FUNÇÃO DE CONVERSÃO SEGURA (ESSENCIAL) ---
+;;; Recebe um dado e retorna sempre uma Lista de Ponto, não importa o que o AutoCAD devolver.
+(defun IAN:safely-get-point-list (raw_point_data / data_type)
+  (setq data_type (type raw_point_data))
+  (cond
+    ((= data_type 'VARIANT)
+     (vlax-safearray->list (vlax-variant-value raw_point_data))
+    )
+    ((= data_type 'LIST)
+     raw_point_data ; Já é uma lista, só a retorna.
+    )
+    (t nil) ; Se for qualquer outra coisa, retorna nil.
+  )
+)
 
-;;; --- Função "Motor" para CBE: Executa a lógica com parâmetros definidos ---
-(defun IAN:cbe-core (ss_entidades direcao_escada_str offset_h alt_v z_final / doc 
-                     mspace i ent_name vla_ent lista_blocos lista_linhas_apoio 
-                     listas_classificadas blocos_na_base blocos_deslocados
+;;; --- NOVA FUNÇÃO "GPS" (v8 - USANDO CONVERSÃO SEGURA) ---
+(defun IAN:cbe-get-target-z-for-block (vla_block lista_linhas_perfil /
+                                       pt_base rot_base perp_angle p1_wall p2_wall p1_wall_2d p2_wall_2d
+                                       linha_topo pt_start_topo pt_end_topo pt_start_topo_2d pt_end_topo_2d
+                                       intersections_list pt_inter_2d min_dist best_point dist z_alvo
+                                      )
+  ;; Função auxiliar interna para converter um ponto 3D para 2D
+  (defun 2d (p) (list (car p) (cadr p)))
+  
+  (setq pt_base (IAN:abs-get-insertion-point-list vla_block))
+  (setq rot_base (vla-get-Rotation vla_block))
+
+  (setq perp_angle (+ rot_base (/ PI 2.0)))
+  (setq p1_wall (polar pt_base perp_angle 1.0e9))
+  (setq p2_wall (polar pt_base perp_angle -1.0e9))
+  (setq p1_wall_2d (2d p1_wall))
+  (setq p2_wall_2d (2d p2_wall))
+  
+  (setq intersections_list nil)
+
+  ;; 1. Coleta TODAS as interseções válidas
+  (foreach linha_topo lista_linhas_perfil
+    ;; USA A FUNÇÃO DE CONVERSÃO SEGURA para evitar o erro de tipo
+    (setq pt_start_topo (IAN:safely-get-point-list (vlax-curve-getStartPoint linha_topo)))
+    (setq pt_end_topo (IAN:safely-get-point-list (vlax-curve-getEndPoint linha_topo)))
+    
+    (if (and pt_start_topo pt_end_topo)
+      (progn
+        (setq pt_start_topo_2d (2d pt_start_topo))
+        (setq pt_end_topo_2d (2d pt_end_topo))
+        (setq pt_inter_2d (inters p1_wall_2d p2_wall_2d pt_start_topo_2d pt_end_topo_2d T))
+        
+        (if pt_inter_2d
+          (setq intersections_list (cons (list pt_inter_2d linha_topo) intersections_list))
+        )
+      )
+    )
+  )
+
+  ;; 2. Se encontrou interseções, agora procura a MAIS PRÓXIMA do bloco
+  (if intersections_list
+    (progn
+      (setq min_dist nil best_point nil)
+      (foreach item intersections_list
+        (setq pt_inter_2d (car item))
+        (setq dist (distance (2d pt_base) pt_inter_2d))
+        (if (or (null min_dist) (< dist min_dist))
+          (progn
+            (setq min_dist dist)
+            (setq best_point item)
+          )
+        )
+      )
+      
+      ;; 3. Com a melhor interseção (a mais próxima), finalmente calcula o Z
+      (if best_point
+        (setq z_alvo (caddr (vlax-curve-getClosestPointTo (cadr best_point) (append (car best_point) '(0.0)))))
+      )
+    )
+  )
+  z_alvo ; Retorna o Z encontrado ou nil
+)
+
+
+;;; --- Função "Motor" para CBE (MODIFICADA) ---
+(defun IAN:cbe-core (ss_entidades_base ss_linhas_perfil offset_h alt_v / doc mspace 
+                     i ent_name vla_ent lista_blocos lista_linhas_alinhamento 
+                     lista_linhas_perfil_vla listas_classificadas blocos_na_base 
+                     blocos_deslocados
                     ) 
-  ;; --- Inicialização ---
   (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))
   (setq mspace (vla-get-ModelSpace doc))
 
-  ;; --- Separar Entidades em Listas ---
-  (setq lista_blocos       nil
-        lista_linhas_apoio nil
-        i                  0
-  )
-  (while (< i (sslength ss_entidades)) 
-    (setq ent_name (ssname ss_entidades i))
+  ;; --- 1. Separa as entidades da PRIMEIRA seleção ---
+  (setq lista_blocos nil lista_linhas_alinhamento nil i 0)
+  (while (< i (sslength ss_entidades_base))
+    (setq ent_name (ssname ss_entidades_base i))
     (setq vla_ent (vlax-ename->vla-object ent_name))
-    (cond 
-      ((= (vla-get-ObjectName vla_ent) "AcDbBlockReference")
-       (setq lista_blocos (cons vla_ent lista_blocos))
-      )
-      ((member (vla-get-ObjectName vla_ent) '("AcDbLine" "AcDbPolyline"))
-       (setq lista_linhas_apoio (cons vla_ent lista_linhas_apoio))
-      )
+    (if (= (vla-get-ObjectName vla_ent) "AcDbBlockReference")
+      (setq lista_blocos (cons vla_ent lista_blocos))
+      (setq lista_linhas_alinhamento (cons vla_ent lista_linhas_alinhamento))
     )
     (setq i (1+ i))
   )
-  (if (or (null lista_blocos) (null lista_linhas_apoio)) 
-    (progn (princ "\n[ERRO] A seleção deve conter tanto blocos quanto linhas/polilinhas.") 
-           (exit)
-    )
+  
+  ;; --- 2. Converte a SEGUNDA seleção para uma lista de objetos VLA ---
+  (setq lista_linhas_perfil_vla nil i 0)
+  (while (< i (sslength ss_linhas_perfil))
+    (setq vla_ent (vlax-ename->vla-object (ssname ss_linhas_perfil i)))
+    (setq lista_linhas_perfil_vla (cons vla_ent lista_linhas_perfil_vla))
+    (setq i (1+ i))
   )
 
-  (princ 
-    (strcat "\n" 
-            (itoa (length lista_blocos))
-            " bloco(s) e "
-            (itoa (length lista_linhas_apoio))
-            " linha(s) de apoio na seleção."
-    )
+  ;; --- Validação ---
+  (if (or (null lista_blocos) (null lista_linhas_alinhamento) (null lista_linhas_perfil_vla))
+    (progn (princ "\n[ERRO] As seleções estão incompletas. Verifique se selecionou os tipos certos de entidade.") (exit))
   )
+
+  (princ (strcat "\nEntidades da Base: " (itoa (length lista_blocos)) " bloco(s) e " (itoa (length lista_linhas_alinhamento)) " linha(s) de alinhamento."))
+  (princ (strcat "\nEntidades do Topo: " (itoa (length lista_linhas_perfil_vla)) " linha(s) de perfil."))
 
   ;; --- Classificar Blocos ---
-  (setq listas_classificadas (IAN:cbe-classificar-blocos 
-                               lista_blocos
-                               lista_linhas_apoio
-                               mspace
-                             )
-  )
+  (setq listas_classificadas (IAN:cbe-classificar-blocos lista_blocos lista_linhas_alinhamento mspace))
   (setq blocos_na_base (car listas_classificadas))
   (setq blocos_deslocados (cadr listas_classificadas))
 
   ;; --- Decidir o Modo de Execução (Dispatcher) ---
   (if (null blocos_deslocados) 
-    ;; MODO 1: ESCADINHA SIMPLES
-    (IAN:cbe-executar-escadinha-simples blocos_na_base mspace direcao_escada_str 
-                                        offset_h alt_v z_final
-    )
-    ;; MODO 2: ZIG-ZAG
-    (IAN:cbe-executar-zigzag blocos_na_base blocos_deslocados mspace 
-                             direcao_escada_str offset_h alt_v z_final
-    )
+    (IAN:cbe-executar-escadinha-simples blocos_na_base mspace lista_linhas_perfil_vla offset_h alt_v)
+    (IAN:cbe-executar-zigzag blocos_na_base blocos_deslocados mspace lista_linhas_perfil_vla offset_h alt_v)
   )
   (princ)
 )
 
 ;;;
-;;; c:CRIAR_CAMADAS_BLOCO_ESCADINHA (CBE) 
-;;; Função principal que coleta dados do usuário e chama o motor IAN:cbe-core.
+;;; c:CRIAR_CAMADAS_BLOCO_ESCADINHA (CBE) - (MODIFICADA)
 ;;;
 (defun c:CRIAR_CAMADAS_BLOCO_ESCADINHA (/ *error* old_cmdecho old_clayer old_osmode 
-                                        ss_entidades_selecionadas direcao_escada_str 
-                                        offset_h alt_v z_final
+                                        ss_entidades_base ss_linhas_perfil
+                                        offset_h alt_v
                                        ) 
-  ;; --- Manipulador de Erro Local ---
   (defun *error* (msg) 
-    (IAN:std-error 
-      msg
-      (function 
-        (lambda () 
-          (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
-          (if old_clayer (setvar "CLAYER" old_clayer))
-          (IAN:restore-osnap old_osmode)
-        )
-      )
-    )
+    (IAN:std-error msg (lambda () 
+                         (if old_cmdecho (setvar "CMDECHO" old_cmdecho))
+                         (if old_clayer (setvar "CLAYER" old_clayer))
+                         (IAN:restore-osnap old_osmode)
+                       ))
   )
 
-  ;; --- Inicialização ---
-  (setq old_cmdecho (getvar "CMDECHO"))
-  (setvar "CMDECHO" 0)
+  (setq old_cmdecho (getvar "CMDECHO")) (setvar "CMDECHO" 0)
   (setq old_clayer (getvar "CLAYER"))
   (setq old_osmode (IAN:disable-osnap))
 
-  (princ "\n>>> CRIAR CAMADAS DE BLOCO EM ESCADINHA (CBE v2.2) <<<")
+  (princ "\n>>> CRIAR CAMADAS DE BLOCO (Perfil Dinâmico) <<<")
 
-  ;; --- Etapa 1: Coletar TODOS os parâmetros do usuário ---
-  (princ "\nSelecione os blocos base E as linhas/polilinhas de apoio:")
-  (setq ss_entidades_selecionadas (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+  ;; --- ETAPA 1: SELEÇÃO DE BASE ---
+  (princ "\nSelecione os BLOCOS BASE e suas LINHAS DE ALINHAMENTO:")
+  (setq ss_entidades_base (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
 
-  (if ss_entidades_selecionadas 
-    (progn 
-      (initget "Subir Descer")
-      (setq direcao_escada_str (getkword "\nA escadinha será para [Subir/Descer]?: "))
-      (setq offset_h (getdist "\nDigite o offset horizontal por camada (recuo/avanço): "))
-      (setq alt_v (getdist "\nDigite a altura vertical por camada (altura do degrau): "))
-      (setq z_final (getreal "\nDigite a coordenada Z final desejada para a última camada: "))
+  (if ss_entidades_base
+    (progn
+      ;; --- ETAPA 2: SELEÇÃO DE PERFIL ---
+      (princ "\nAgora, selecione as LINHAS DE PERFIL do topo:")
+      (setq ss_linhas_perfil (ssget '((0 . "LINE,LWPOLYLINE"))))
 
-      ;; --- Etapa 2: Validar e Chamar o Motor ---
-      (if (and direcao_escada_str offset_h alt_v z_final (> alt_v 0.0)) 
-        (IAN:cbe-core ss_entidades_selecionadas direcao_escada_str offset_h alt_v 
-                      z_final
+      (if ss_linhas_perfil
+        (progn
+          (initget 7)
+          (setq offset_h (getdist "\nDigite o offset horizontal por camada (recuo/avanço, pode ser 0): "))
+          (setq alt_v (getdist "\nDigite a altura vertical por camada: "))
+
+          (if (and (numberp offset_h) alt_v (> alt_v 0.0))
+            (IAN:cbe-core ss_entidades_base ss_linhas_perfil offset_h alt_v)
+            (princ "\nParâmetros inválidos ou cancelados. Comando encerrado.")
+          )
         )
-        (princ "\nParâmetros inválidos ou cancelados. Comando encerrado.")
+        (princ "\nNenhuma linha de perfil selecionada. Comando cancelado.")
       )
     )
-    (princ "\nNenhuma entidade selecionada. Comando cancelado.")
+    (princ "\nNenhuma entidade de base selecionada. Comando cancelado.")
   )
 
-  ;; --- Finalização ---
   (setvar "CMDECHO" old_cmdecho)
   (setvar "CLAYER" old_clayer)
   (IAN:restore-osnap old_osmode)
