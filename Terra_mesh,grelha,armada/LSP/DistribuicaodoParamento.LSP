@@ -1173,11 +1173,12 @@
   )
 )
 
-;;; --- NOVA FUNÇÃO "GPS" (v8 - USANDO CONVERSÃO SEGURA) ---
+;;; --- FUNÇÃO "GPS" (v9 - USA DISTÂNCIA AO LONGO DA CURVA, O MÉTODO CORRETO) ---
 (defun IAN:cbe-get-target-z-for-block (vla_block lista_linhas_perfil /
                                        pt_base rot_base perp_angle p1_wall p2_wall p1_wall_2d p2_wall_2d
                                        linha_topo pt_start_topo pt_end_topo pt_start_topo_2d pt_end_topo_2d
-                                       intersections_list pt_inter_2d min_dist best_point dist z_alvo
+                                       intersections_list pt_inter_2d min_dist best_item dist
+                                       dist_2d_along_segment final_3d_point z_alvo
                                       )
   ;; Função auxiliar interna para converter um ponto 3D para 2D
   (defun 2d (p) (list (car p) (cadr p)))
@@ -1193,9 +1194,8 @@
   
   (setq intersections_list nil)
 
-  ;; 1. Coleta TODAS as interseções válidas
+  ;; 1. Coleta TODAS as interseções 2D válidas
   (foreach linha_topo lista_linhas_perfil
-    ;; USA A FUNÇÃO DE CONVERSÃO SEGURA para evitar o erro de tipo
     (setq pt_start_topo (IAN:safely-get-point-list (vlax-curve-getStartPoint linha_topo)))
     (setq pt_end_topo (IAN:safely-get-point-list (vlax-curve-getEndPoint linha_topo)))
     
@@ -1206,30 +1206,40 @@
         (setq pt_inter_2d (inters p1_wall_2d p2_wall_2d pt_start_topo_2d pt_end_topo_2d T))
         
         (if pt_inter_2d
-          (setq intersections_list (cons (list pt_inter_2d linha_topo) intersections_list))
+          (setq intersections_list (cons (list pt_inter_2d linha_topo pt_start_topo_2d) intersections_list))
         )
       )
     )
   )
 
-  ;; 2. Se encontrou interseções, agora procura a MAIS PRÓXIMA do bloco
+  ;; 2. Se encontrou interseções, procura a MAIS PRÓXIMA do bloco
   (if intersections_list
     (progn
-      (setq min_dist nil best_point nil)
+      (setq min_dist nil best_item nil)
       (foreach item intersections_list
         (setq pt_inter_2d (car item))
         (setq dist (distance (2d pt_base) pt_inter_2d))
         (if (or (null min_dist) (< dist min_dist))
-          (progn
-            (setq min_dist dist)
-            (setq best_point item)
-          )
+          (setq min_dist dist best_item item)
         )
       )
       
-      ;; 3. Com a melhor interseção (a mais próxima), finalmente calcula o Z
-      (if best_point
-        (setq z_alvo (caddr (vlax-curve-getClosestPointTo (cadr best_point) (append (car best_point) '(0.0)))))
+      ;; 3. Com a melhor interseção (a mais próxima), usa o método da distância
+      (if best_item
+        (progn
+          (setq pt_inter_2d (car best_item))
+          (setq linha_topo (cadr best_item))
+          (setq pt_start_topo_2d (caddr best_item))
+          
+          ;; Calcula a distância 2D do início do segmento de perfil até a interseção
+          (setq dist_2d_along_segment (distance pt_start_topo_2d pt_inter_2d))
+          
+          ;; "Caminha" essa mesma distância na linha de perfil 3D para achar o ponto exato
+          (setq final_3d_point (IAN:safely-get-point-list (vlax-curve-getPointAtDist linha_topo dist_2d_along_segment)))
+          
+          ;; Extrai o Z desse ponto
+          (if final_3d_point (setq z_alvo (caddr final_3d_point)))
+        )
       )
     )
   )
