@@ -2357,41 +2357,20 @@
               (princ (strcat "\nBloco selecionado: '" nome_bloco_terramesh "'."))
               ;; Chama o "motor" do CBPM com o arquivo gerado e o bloco selecionado
               (IAN:cbpm-core caminho_arquivo nome_bloco_terramesh)
-              (princ "\n\n--- Construcao de Muro Terramesh (Primeira Fiada) Concluida ---")
-              ;; =================================================================
-              ;; --- PARTE 3: CONSTRUIR CAMADAS SUPERIORES (CBE - SUBIR) ---
-              ;; =================================================================
-              (princ "\n\n--- Etapa de Subida ---")
-              (princ "\nSelecione os blocos e as linhas de apoio para SUBIR (ou pressione ENTER para pular):")
-              (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+              (princ "\n\n--- Construção de Muro Terramesh (Primeira Fiada) Concluída ---")
+              
+              ;; --- PARTE 3: CONSTRUIR CAMADAS (CHAMADA AUTOMÁTICA DO CBE) ---
+              (command "_.zoom" "_e")
+              (princ "\n\n>>> CONSTRUÇÃO VERTICAL <<<")
+              (princ "\nSelecione TODAS as entidades da base (blocos e linhas) E as linhas de PERFIL do topo:")
+              (setq ss_todas_entidades_cbe (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
 
-              (if ss_entidades_subir 
-                (progn 
-                  (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
-                  (if z_final 
-                    (IAN:cbe-core ss_entidades_subir "Subir" 0.1 1.0 z_final)
-                    (princ "\nZ Final não informado. Etapa pulada.")
-                  )
+              (if ss_todas_entidades_cbe
+                (progn
+                  ;; Chama o motor do CBE com os parâmetros específicos do Terramesh
+                  (IAN:cbe-core ss_todas_entidades_cbe 0.1 1.0)
                 )
-                (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
-              )
-
-              ;; =================================================================
-              ;; --- PARTE 4: CONSTRUIR CAMADAS INFERIORES (CBE - DESCER) ---
-              ;; =================================================================
-              (princ "\n\n--- Etapa de Descida ---")
-              (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
-              (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-
-              (if ss_entidades_descer 
-                (progn 
-                  (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
-                  (if z_final 
-                    (IAN:cbe-core ss_entidades_descer "Descer" 0.1 1.0 z_final)
-                    (princ "\nZ Final não informado. Etapa pulada.")
-                  )
-                )
-                (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+                (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
               )
             )
             (princ "\nSeleção de bloco cancelada.")
@@ -2483,32 +2462,31 @@
 
   ;; --- Etapa 1.4: Criar Camadas Verticais (CBE-Core) ---
   (if (not all_base_blocks_vla) 
-    (progn (princ "\nNenhum bloco foi processado na etapa anterior. Cancelando.") 
-           (exit)
+    (progn (princ "\nNenhum bloco foi processado na etapa anterior. Cancelando.") (exit))
+  )
+
+  (princ "\n\n>>> CONSTRUÇÃO VERTICAL <<<")
+  (princ "\nA base do muro foi criada. Agora, selecione as LINHAS DE PERFIL do topo:")
+  (setq ss_linhas_perfil (ssget '((0 . "LINE,LWPOLYLINE"))))
+
+  (if ss_linhas_perfil
+    (progn
+      (princ "\nMontando seleção completa para o CBE...")
+      ;; Cria um novo "carrinho de compras" (selection set)
+      (setq ss_todas_entidades_cbe (ssadd))
+      
+      ;; Adiciona a linha de base original
+      (ssadd (ssname ss_base_ta 0) ss_todas_entidades_cbe)
+      ;; Adiciona todos os blocos da base
+      (foreach blk all_base_blocks_vla (ssadd (vlax-vla-object->ename blk) ss_todas_entidades_cbe))
+      ;; Adiciona as linhas de perfil do topo
+      (foreach ent (vl-remove-if 'listp (mapcar 'cadr (ssnamex ss_linhas_perfil))) (ssadd ent ss_todas_entidades_cbe))
+
+      ;; Chama o motor do CBE com os parâmetros específicos do Terra Armada
+      (IAN:cbe-core ss_todas_entidades_cbe 0.0 0.75)
     )
+    (princ "\nNenhuma linha de perfil selecionada. Operação concluída.")
   )
-
-  (princ "\nMontando seleção para construção vertical automaticamente...")
-
-  ;; Cria um novo "carrinho de compras" (selection set) vazio
-  (setq ss_entidades_cbe (ssadd))
-
-  ;; Adiciona a linha de base original que o usuário selecionou no começo
-  (ssadd (ssname ss_base_ta 0) ss_entidades_cbe)
-
-  ;; Passa por cada bloco da lista que guardamos e adiciona no carrinho
-  (foreach blk all_base_blocks_vla 
-    (ssadd (vlax-vla-object->ename blk) ss_entidades_cbe)
-  )
-
-  (setq z_final (getreal "\nDigite a coordenada Z FINAL desejada para o muro: "))
-  (if (not z_final) 
-    (progn (princ "\nZ Final não informado. Comando cancelado.") (exit))
-  )
-
-  ;; Chama o CBE com a seleção que montamos sozinhos
-  (IAN:cbe-core ss_entidades_cbe "Subir" 0.0 0.75 z_final)
-  (princ "\n\n--- Construção vertical dos blocos inteiros concluída. ---")
 
   ;; =================================================================
   ;; --- FASE 2: MEIO BLOCO ---
@@ -2626,39 +2604,20 @@
   (princ "\n\n--- Altura da primeira fiada alternada automaticamente. ---")
 
   ;; =================================================================
-  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CBE) com altura e offset de 0.4 ---
+  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CHAMADA AUTOMÁTICA DO CBE) ---
   ;; =================================================================
+  (princ "\n\n--- Base do Muro Lock & Load Concluída ---")
+  (command "_.zoom" "_e")
+  (princ "\n\n>>> CONSTRUÇÃO VERTICAL <<<")
+  (princ "\nSelecione TODAS as entidades da base (blocos e linhas) E as linhas de PERFIL do topo:")
+  (setq ss_todas_entidades_cbe (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
 
-  ;; --- Etapa de Subida ---
-  (princ "\n\n--- Etapa de Subida ---")
-  (princ "\nSelecione os blocos e linhas de apoio para SUBIR (ou pressione ENTER para pular):")
-  (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-
-  (if ss_entidades_subir 
-    (progn 
-      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
-      (if z_final 
-        (IAN:cbe-core ss_entidades_subir "Subir" 0.04 0.4 z_final)
-        (princ "\nZ Final não informado. Etapa pulada.")
-      )
+  (if ss_todas_entidades_cbe
+    (progn
+      ;; Parâmetros do Lock & Load: offset 0.04, altura 0.4
+      (IAN:cbe-core ss_todas_entidades_cbe 0.04 0.4)
     )
-    (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
-  )
-
-  ;; --- Etapa de Descida ---
-  (princ "\n\n--- Etapa de Descida ---")
-  (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
-  (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-
-  (if ss_entidades_descer 
-    (progn 
-      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
-      (if z_final 
-        (IAN:cbe-core ss_entidades_descer "Descer" 0.04 0.4 z_final)
-        (princ "\nZ Final não informado. Etapa pulada.")
-      )
-    )
-    (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+    (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
   )
 
   ;; --- Finalização ---
@@ -2742,39 +2701,20 @@
   )
 
   ;; =================================================================
-  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CBE) ---
+  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CHAMADA AUTOMÁTICA DO CBE) ---
   ;; =================================================================
+  (princ "\n\n--- Base do Muro de Geogrelha Concluída ---")
+  (command "_.zoom" "_e")
+  (princ "\n\n>>> CONSTRUÇÃO VERTICAL <<<")
+  (princ "\nSelecione TODAS as entidades da base (blocos e linhas) E as linhas de PERFIL do topo:")
+  (setq ss_todas_entidades_cbe (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
 
-  ;; --- Etapa de Subida ---
-  (princ "\n\n--- Etapa de Subida ---")
-  (princ "\nSelecione os blocos e linhas de apoio para SUBIR (ou pressione ENTER para pular):")
-  (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-
-  (if ss_entidades_subir 
-    (progn 
-      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
-      (if z_final 
-        (IAN:cbe-core ss_entidades_subir "Subir" 0.1 1.0 z_final)
-        (princ "\nZ Final não informado. Etapa pulada.")
-      )
+  (if ss_todas_entidades_cbe
+    (progn
+      ;; Parâmetros da Geogrelha: offset 0.1, altura 1.0
+      (IAN:cbe-core ss_todas_entidades_cbe 0.1 1.0)
     )
-    (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
-  )
-
-  ;; --- Etapa de Descida ---
-  (princ "\n\n--- Etapa de Descida ---")
-  (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
-  (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-
-  (if ss_entidades_descer 
-    (progn 
-      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
-      (if z_final 
-        (IAN:cbe-core ss_entidades_descer "Descer" 0.1 1.0 z_final)
-        (princ "\nZ Final não informado. Etapa pulada.")
-      )
-    )
-    (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+    (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
   )
 
   ;; --- Finalização ---
@@ -2855,39 +2795,20 @@
   (princ "\n\n--- Altura da primeira fiada alternada automaticamente. ---")
 
   ;; =================================================================
-  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CBE) ---
+  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CHAMADA AUTOMÁTICA DO CBE) ---
   ;; =================================================================
+  (princ "\n\n--- Base do Muro StrataSlope Concluída ---")
+  (command "_.zoom" "_e")
+  (princ "\n\n>>> CONSTRUÇÃO VERTICAL <<<")
+  (princ "\nSelecione TODAS as entidades da base (blocos e linhas) E as linhas de PERFIL do topo:")
+  (setq ss_todas_entidades_cbe (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
 
-  ;; --- Etapa de Subida ---
-  (princ "\n\n--- Etapa de Subida ---")
-  (princ "\nSelecione os blocos e linhas de apoio para SUBIR (ou pressione ENTER para pular):")
-  (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-
-  (if ss_entidades_subir 
-    (progn 
-      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
-      (if z_final 
-        (IAN:cbe-core ss_entidades_subir "Subir" 0.05 0.5 z_final)
-        (princ "\nZ Final não informado. Etapa pulada.")
-      )
+  (if ss_todas_entidades_cbe
+    (progn
+      ;; Parâmetros do StrataSlope: offset 0.05, altura 0.5
+      (IAN:cbe-core ss_todas_entidades_cbe 0.05 0.5)
     )
-    (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
-  )
-
-  ;; --- Etapa de Descida ---
-  (princ "\n\n--- Etapa de Descida ---")
-  (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
-  (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-
-  (if ss_entidades_descer 
-    (progn 
-      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
-      (if z_final 
-        (IAN:cbe-core ss_entidades_descer "Descer" 0.05 0.5 z_final)
-        (princ "\nZ Final não informado. Etapa pulada.")
-      )
-    )
-    (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+    (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
   )
 
   ;; --- Finalização ---
@@ -2942,39 +2863,20 @@
   (princ "\n\n--- Primeira fiada de blocos Quadratum criada. ---")
   
   ;; =================================================================
-  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CBE) ---
+  ;; --- FASE 2: CONSTRUÇÃO VERTICAL (CHAMADA AUTOMÁTICA DO CBE) ---
   ;; =================================================================
+  (princ "\n\n--- Base do Muro Quadratum Concluída ---")
+  (command "_.zoom" "_e")
+  (princ "\n\n>>> CONSTRUÇÃO VERTICAL <<<")
+  (princ "\nSelecione TODAS as entidades da base (blocos e linhas) E as linhas de PERFIL do topo:")
+  (setq ss_todas_entidades_cbe (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
   
-  ;; --- Etapa de Subida ---
-  (princ "\n\n--- Etapa de Subida ---")
-  (princ "\nSelecione os blocos e linhas de apoio para SUBIR (ou pressione ENTER para pular):")
-  (setq ss_entidades_subir (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-  
-  (if ss_entidades_subir
+  (if ss_todas_entidades_cbe
     (progn
-      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a subida: "))
-      (if z_final
-        (IAN:cbe-core ss_entidades_subir "Subir" 0.12 0.6 z_final)
-        (princ "\nZ Final não informado. Etapa pulada.")
-      )
+      ;; Parâmetros do Quadratum: offset 0.12, altura 0.6
+      (IAN:cbe-core ss_todas_entidades_cbe 0.12 0.6)
     )
-    (princ "\nNenhuma entidade selecionada para subir. Etapa pulada.")
-  )
-
-  ;; --- Etapa de Descida ---
-  (princ "\n\n--- Etapa de Descida ---")
-  (princ "\nSelecione os blocos e as linhas de apoio para DESCER (ou pressione ENTER para pular):")
-  (setq ss_entidades_descer (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
-
-  (if ss_entidades_descer
-    (progn
-      (setq z_final (getreal "\nDigite a coordenada Z FINAL para a descida: "))
-      (if z_final
-        (IAN:cbe-core ss_entidades_descer "Descer" 0.12 0.6 z_final)
-        (princ "\nZ Final não informado. Etapa pulada.")
-      )
-    )
-    (princ "\nNenhuma entidade selecionada para descer. Etapa pulada.")
+    (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
   )
 
   ;; --- Finalização ---
