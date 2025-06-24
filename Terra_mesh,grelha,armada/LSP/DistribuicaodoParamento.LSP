@@ -1236,63 +1236,103 @@
   z_alvo ; Retorna o Z encontrado ou nil
 )
 
-
-;;; --- Função "Motor" para CBE (MODIFICADA) ---
-(defun IAN:cbe-core (ss_entidades_base ss_linhas_perfil offset_h alt_v / doc mspace 
-                     i ent_name vla_ent lista_blocos lista_linhas_alinhamento 
-                     lista_linhas_perfil_vla listas_classificadas blocos_na_base 
-                     blocos_deslocados
-                    ) 
-  (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))
-  (setq mspace (vla-get-ModelSpace doc))
-
-  ;; --- 1. Separa as entidades da PRIMEIRA seleção ---
-  (setq lista_blocos nil lista_linhas_alinhamento nil i 0)
-  (while (< i (sslength ss_entidades_base))
-    (setq ent_name (ssname ss_entidades_base i))
+;;; --- NOVA FUNÇÃO DE CLASSIFICAÇÃO AUTOMÁTICA (v2 - Robusta) ---
+(defun IAN:cbe-classify-all-v2 (ss_entidades mspace / 
+                                temp_lista_blocos temp_lista_linhas lista_linhas_alinhamento lista_linhas_perfil
+                                i ent_name vla_ent linha pt_medio esfera_temp tocou_bloco bloco
+                                intersection_points
+                               )
+  (princ "\nIniciando classificação automática de entidades...")
+  
+  ;; 1. Primeiro, separa tudo em duas listas temporárias: uma de blocos e uma de linhas.
+  (setq temp_lista_blocos nil temp_lista_linhas nil i 0)
+  (while (< i (sslength ss_entidades))
+    (setq ent_name (ssname ss_entidades i))
     (setq vla_ent (vlax-ename->vla-object ent_name))
-    (if (= (vla-get-ObjectName vla_ent) "AcDbBlockReference")
-      (setq lista_blocos (cons vla_ent lista_blocos))
-      (setq lista_linhas_alinhamento (cons vla_ent lista_linhas_alinhamento))
+    (cond
+      ((= (vla-get-ObjectName vla_ent) "AcDbBlockReference") (setq temp_lista_blocos (cons vla_ent temp_lista_blocos)))
+      ((member (vla-get-ObjectName vla_ent) '("AcDbLine" "AcDbPolyline")) (setq temp_lista_linhas (cons vla_ent temp_lista_linhas)))
     )
     (setq i (1+ i))
   )
+
+  ;; 2. Agora, classifica cada linha da lista temporária.
+  (setq lista_linhas_alinhamento nil lista_linhas_perfil nil)
+  (foreach linha temp_lista_linhas
+    (setq pt_medio (vlax-curve-getPointAtDist linha (/ (vlax-curve-getDistAtParam linha (vlax-curve-getEndParam linha)) 2.0)))
+    (setq esfera_temp (vla-AddCircle mspace (vlax-3d-point pt_medio) 0.5)) ; Raio de 0.5 para o teste
+    (setq tocou_bloco nil)
+    
+    ;; Para cada linha, testa contra TODOS os blocos.
+    (foreach bloco temp_lista_blocos
+      (if (not tocou_bloco) ; Otimização: para de procurar se já achou um.
+        (progn
+          (setq intersection_points (vl-catch-all-apply 'vla-IntersectWith (list esfera_temp bloco acExtendNone)))
+          (if (and (not (vl-catch-all-error-p intersection_points)) 
+                   (> (vlax-safearray-get-u-bound (vlax-variant-value intersection_points) 1) -1))
+            (setq tocou_bloco T)
+          )
+        )
+      )
+    )
+    (vla-delete esfera_temp) ; Apaga a esfera de teste.
+    
+    ;; Adiciona a linha na lista final correta.
+    (if tocou_bloco
+      (setq lista_linhas_alinhamento (cons linha lista_linhas_alinhamento))
+      (setq lista_linhas_perfil (cons linha lista_linhas_perfil))
+    )
+  )
+
+  (princ (strcat " Classificação concluída."))
+  (princ (strcat "\n  - Blocos: " (itoa (length temp_lista_blocos))))
+  (princ (strcat "\n  - Linhas de Alinhamento (base): " (itoa (length lista_linhas_alinhamento))))
+  (princ (strcat "\n  - Linhas de Perfil (topo): " (itoa (length lista_linhas_perfil))))
+
+  ;; Retorna uma lista com as 3 listas prontas para uso.
+  (list (reverse temp_lista_blocos) (reverse lista_linhas_alinhamento) (reverse lista_linhas_perfil))
+)
+
+
+;;; --- NOVA Função "Motor" v5 (Usa classificação automática) ---
+(defun IAN:cbe-core (ss_entidades offset_h alt_v / doc mspace
+                         listas_classificadas_todas
+                         lista_blocos lista_linhas_alinhamento lista_linhas_perfil
+                         listas_classificadas_base blocos_na_base blocos_deslocados
+                       ) 
+  (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))
+  (setq mspace (vla-get-ModelSpace doc))
+
+  ;; --- 1. Classifica TUDO com a nova função automática ---
+  (setq listas_classificadas_todas (IAN:cbe-classify-all-v2 ss_entidades mspace))
+  (setq lista_blocos (nth 0 listas_classificadas_todas))
+  (setq lista_linhas_alinhamento (nth 1 listas_classificadas_todas))
+  (setq lista_linhas_perfil (nth 2 listas_classificadas_todas))
   
-  ;; --- 2. Converte a SEGUNDA seleção para uma lista de objetos VLA ---
-  (setq lista_linhas_perfil_vla nil i 0)
-  (while (< i (sslength ss_linhas_perfil))
-    (setq vla_ent (vlax-ename->vla-object (ssname ss_linhas_perfil i)))
-    (setq lista_linhas_perfil_vla (cons vla_ent lista_linhas_perfil_vla))
-    (setq i (1+ i))
-  )
-
   ;; --- Validação ---
-  (if (or (null lista_blocos) (null lista_linhas_alinhamento) (null lista_linhas_perfil_vla))
-    (progn (princ "\n[ERRO] As seleções estão incompletas. Verifique se selecionou os tipos certos de entidade.") (exit))
+  (if (or (null lista_blocos) (null lista_linhas_alinhamento) (null lista_linhas_perfil))
+    (progn (princ "\n[ERRO] A seleção deve conter blocos, linhas de alinhamento (base) e linhas de perfil (topo).") (exit))
   )
 
-  (princ (strcat "\nEntidades da Base: " (itoa (length lista_blocos)) " bloco(s) e " (itoa (length lista_linhas_alinhamento)) " linha(s) de alinhamento."))
-  (princ (strcat "\nEntidades do Topo: " (itoa (length lista_linhas_perfil_vla)) " linha(s) de perfil."))
+  ;; --- 2. Classifica Blocos (base vs. deslocados) - SEM MUDANÇAS AQUI ---
+  (setq listas_classificadas_base (IAN:cbe-classificar-blocos lista_blocos lista_linhas_alinhamento mspace))
+  (setq blocos_na_base (car listas_classificadas_base))
+  (setq blocos_deslocados (cadr listas_classificadas_base))
 
-  ;; --- Classificar Blocos ---
-  (setq listas_classificadas (IAN:cbe-classificar-blocos lista_blocos lista_linhas_alinhamento mspace))
-  (setq blocos_na_base (car listas_classificadas))
-  (setq blocos_deslocados (cadr listas_classificadas))
-
-  ;; --- Decidir o Modo de Execução (Dispatcher) ---
+  ;; --- 3. Decidir o Modo de Execução (Dispatcher) - SEM MUDANÇAS AQUI ---
   (if (null blocos_deslocados) 
-    (IAN:cbe-executar-escadinha-simples blocos_na_base mspace lista_linhas_perfil_vla offset_h alt_v)
-    (IAN:cbe-executar-zigzag blocos_na_base blocos_deslocados mspace lista_linhas_perfil_vla offset_h alt_v)
+    (IAN:cbe-executar-escadinha-simples blocos_na_base mspace lista_linhas_perfil offset_h alt_v)
+    (IAN:cbe-executar-zigzag blocos_na_base blocos_deslocados mspace lista_linhas_perfil offset_h alt_v)
   )
   (princ)
 )
 
 ;;;
-;;; c:CRIAR_CAMADAS_BLOCO_ESCADINHA (CBE) - (MODIFICADA)
+;;; c:CRIAR_CAMADAS_BLOCO_ESCADINHA (CBE) 
+;;; Função principal com seleção única.
 ;;;
 (defun c:CRIAR_CAMADAS_BLOCO_ESCADINHA (/ *error* old_cmdecho old_clayer old_osmode 
-                                        ss_entidades_base ss_linhas_perfil
-                                        offset_h alt_v
+                                        ss_entidades_selecionadas offset_h alt_v
                                        ) 
   (defun *error* (msg) 
     (IAN:std-error msg (lambda () 
@@ -1306,33 +1346,25 @@
   (setq old_clayer (getvar "CLAYER"))
   (setq old_osmode (IAN:disable-osnap))
 
-  (princ "\n>>> CRIAR CAMADAS DE BLOCO (Perfil Dinâmico) <<<")
+  (princ "\n>>> CRIAR CAMADAS DE BLOCO (Classificação Automática) <<<")
 
-  ;; --- ETAPA 1: SELEÇÃO DE BASE ---
-  (princ "\nSelecione os BLOCOS BASE e suas LINHAS DE ALINHAMENTO:")
-  (setq ss_entidades_base (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
+  ;; --- ETAPA 1: SELEÇÃO ÚNICA ---
+  (princ "\nSelecione TUDO: blocos, linhas de alinhamento e linhas de perfil:")
+  (setq ss_entidades_selecionadas (ssget '((0 . "INSERT,LINE,LWPOLYLINE"))))
 
-  (if ss_entidades_base
-    (progn
-      ;; --- ETAPA 2: SELEÇÃO DE PERFIL ---
-      (princ "\nAgora, selecione as LINHAS DE PERFIL do topo:")
-      (setq ss_linhas_perfil (ssget '((0 . "LINE,LWPOLYLINE"))))
+  (if ss_entidades_selecionadas 
+    (progn 
+      (initget 7)
+      (setq offset_h (getdist "\nDigite o offset horizontal por camada (recuo/avanço, pode ser 0): "))
+      (setq alt_v (getdist "\nDigite a altura vertical por camada: "))
 
-      (if ss_linhas_perfil
-        (progn
-          (initget 7)
-          (setq offset_h (getdist "\nDigite o offset horizontal por camada (recuo/avanço, pode ser 0): "))
-          (setq alt_v (getdist "\nDigite a altura vertical por camada: "))
-
-          (if (and (numberp offset_h) alt_v (> alt_v 0.0))
-            (IAN:cbe-core ss_entidades_base ss_linhas_perfil offset_h alt_v)
-            (princ "\nParâmetros inválidos ou cancelados. Comando encerrado.")
-          )
-        )
-        (princ "\nNenhuma linha de perfil selecionada. Comando cancelado.")
+      ;; --- Etapa 2: Validar e Chamar o Motor ---
+      (if (and (numberp offset_h) alt_v (> alt_v 0.0)) 
+        (IAN:cbe-core ss_entidades_selecionadas offset_h alt_v)
+        (princ "\nParâmetros inválidos ou cancelados. Comando encerrado.")
       )
     )
-    (princ "\nNenhuma entidade de base selecionada. Comando cancelado.")
+    (princ "\nNenhuma entidade selecionada. Comando cancelado.")
   )
 
   (setvar "CMDECHO" old_cmdecho)
