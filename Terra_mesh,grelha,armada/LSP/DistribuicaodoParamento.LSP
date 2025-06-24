@@ -1957,7 +1957,7 @@
     (setq i (1+ i))
   )
   (setq lista_colunas nil)
-  (setq raio_de_toque 0.3)
+  (setq raio_de_toque 0.7)
 
   ;; --- for bloco in lista completa: ---
   (foreach bloco_A lista_completa
