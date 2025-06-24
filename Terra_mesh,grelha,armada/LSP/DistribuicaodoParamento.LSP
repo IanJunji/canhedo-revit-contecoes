@@ -1295,7 +1295,7 @@
 
 
 ;;; --- NOVA Função "Motor" v5 (Usa classificação automática) ---
-(defun IAN:cbe-core (ss_entidades offset_h alt_v / doc mspace
+(defun IAN:cbe-core (ss_entidades offset_h alt_v force_simple_mode  / doc mspace
                          listas_classificadas_todas
                          lista_blocos lista_linhas_alinhamento lista_linhas_perfil
                          listas_classificadas_base blocos_na_base blocos_deslocados
@@ -1314,15 +1314,23 @@
     (progn (princ "\n[ERRO] A seleção deve conter blocos, linhas de alinhamento (base) e linhas de perfil (topo).") (exit))
   )
 
-  ;; --- 2. Classifica Blocos (base vs. deslocados) - SEM MUDANÇAS AQUI ---
+  ;; --- 2. Classifica Blocos (base vs. deslocados) ---
   (setq listas_classificadas_base (IAN:cbe-classificar-blocos lista_blocos lista_linhas_alinhamento mspace))
   (setq blocos_na_base (car listas_classificadas_base))
   (setq blocos_deslocados (cadr listas_classificadas_base))
 
-  ;; --- 3. Decidir o Modo de Execução (Dispatcher) - SEM MUDANÇAS AQUI ---
-  (if (null blocos_deslocados) 
-    (IAN:cbe-executar-escadinha-simples blocos_na_base mspace lista_linhas_perfil offset_h alt_v)
-    (IAN:cbe-executar-zigzag blocos_na_base blocos_deslocados mspace lista_linhas_perfil offset_h alt_v)
+  ;; --- 3. Decidir o Modo de Execução (Dispatcher) ---
+  (if force_simple_mode
+    ;; Se o modo simples for FORÇADO, ignora a classificação e usa todos os blocos.
+    (progn
+      (princ "\nModo Escadinha Simples FORÇADO.")
+      (IAN:cbe-executar-escadinha-simples lista_blocos mspace lista_linhas_perfil offset_h alt_v)
+    )
+    ;; Se não, usa a lógica de decisão normal.
+    (if (null blocos_deslocados) 
+      (IAN:cbe-executar-escadinha-simples blocos_na_base mspace lista_linhas_perfil offset_h alt_v)
+      (IAN:cbe-executar-zigzag blocos_na_base blocos_deslocados mspace lista_linhas_perfil offset_h alt_v)
+    )
   )
   (princ)
 )
@@ -1360,7 +1368,7 @@
 
       ;; --- Etapa 2: Validar e Chamar o Motor ---
       (if (and (numberp offset_h) alt_v (> alt_v 0.0)) 
-        (IAN:cbe-core ss_entidades_selecionadas offset_h alt_v)
+        (IAN:cbe-core ss_entidades_selecionadas offset_h alt_v nil)
         (princ "\nParâmetros inválidos ou cancelados. Comando encerrado.")
       )
     )
@@ -2368,7 +2376,7 @@
               (if ss_todas_entidades_cbe
                 (progn
                   ;; Chama o motor do CBE com os parâmetros específicos do Terramesh
-                  (IAN:cbe-core ss_todas_entidades_cbe 0.1 1.0)
+                  (IAN:cbe-core ss_todas_entidades_cbe 0.1 1.0 nil)
                 )
                 (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
               )
@@ -2483,7 +2491,7 @@
       (foreach ent (vl-remove-if 'listp (mapcar 'cadr (ssnamex ss_linhas_perfil))) (ssadd ent ss_todas_entidades_cbe))
 
       ;; Chama o motor do CBE com os parâmetros específicos do Terra Armada
-      (IAN:cbe-core ss_todas_entidades_cbe 0.0 0.75)
+      (IAN:cbe-core ss_todas_entidades_cbe 0.0 0.75 nil)
     )
     (princ "\nNenhuma linha de perfil selecionada. Operação concluída.")
   )
@@ -2615,7 +2623,7 @@
   (if ss_todas_entidades_cbe
     (progn
       ;; Parâmetros do Lock & Load: offset 0.04, altura 0.4
-      (IAN:cbe-core ss_todas_entidades_cbe 0.04 0.4)
+      (IAN:cbe-core ss_todas_entidades_cbe 0.04 0.4 nil)
     )
     (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
   )
@@ -2712,7 +2720,7 @@
   (if ss_todas_entidades_cbe
     (progn
       ;; Parâmetros da Geogrelha: offset 0.1, altura 1.0
-      (IAN:cbe-core ss_todas_entidades_cbe 0.1 1.0)
+      (IAN:cbe-core ss_todas_entidades_cbe 0.1 1.0 T)
     )
     (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
   )
@@ -2806,7 +2814,7 @@
   (if ss_todas_entidades_cbe
     (progn
       ;; Parâmetros do StrataSlope: offset 0.05, altura 0.5
-      (IAN:cbe-core ss_todas_entidades_cbe 0.05 0.5)
+      (IAN:cbe-core ss_todas_entidades_cbe 0.05 0.5 nil)
     )
     (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
   )
@@ -2874,7 +2882,7 @@
   (if ss_todas_entidades_cbe
     (progn
       ;; Parâmetros do Quadratum: offset 0.12, altura 0.6
-      (IAN:cbe-core ss_todas_entidades_cbe 0.12 0.6)
+      (IAN:cbe-core ss_todas_entidades_cbe 0.12 0.6 nil)
     )
     (princ "\nNenhuma entidade selecionada para o CBE. Operação concluída.")
   )
