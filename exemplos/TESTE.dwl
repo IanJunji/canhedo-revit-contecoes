@@ -1,3 +1,3 @@
 Geologia
 IAN 
-terça-feira, 24 de junho de 2025  19:46:18
+quarta-feira, 25 de junho de 2025  08:28:17

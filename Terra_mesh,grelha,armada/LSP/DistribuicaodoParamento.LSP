@@ -1941,91 +1941,206 @@
 
 
 
-;;; --- FUNÇÃO DE AGRUPAMENTO (LÓGICA DIRETA DO USUÁRIO) ---
-(defun IAN:agrupar-blocos-logica-direta (ss_todos_os_blocos / 
-                                        lista_completa lista_colunas i mspace raio_de_toque
-                                        bloco_A bloco_B esfera_temp tocou_em_alguem
-                                        coluna_de_A coluna_de_B nova_coluna coluna_mesclada
-                                       )
-  (princ "\nIniciando agrupamento (Sua Lógica)...")
-  (setq mspace (vla-get-ModelSpace (vla-get-ActiveDocument (vlax-get-acad-object))))
+;;; --- FUNÇÃO DE AGRUPAMENTO OTIMIZADA (Usa Grid Espacial e Union-Find) ---
+;;; Complexidade aproximada: O(n*k) onde k é pequeno, muito mais rápido que O(n^2)
+(defun IAN:agrupar-blocos-otimizado (ss_todos_os_blocos / 
+                                     ;; Variáveis Gerais
+                                     lista_completa mspace raio_de_toque
+                                     ;; Variáveis do Grid Espacial
+                                     grid_map grid_size
+                                     ;; Variáveis do Union-Find
+                                     parent_map group_map
+                                     ;; Variáveis de Loop
+                                     i bloco_A pt_A key_A vizinhos_potenciais bloco_B
+                                     root_A root_B
+                                     ;; Variáveis Finais
+                                     grupos_finais_temp grupos_finais
+                                    )
+
+  ;; --- Funções Auxiliares Internas (Helpers) para o Union-Find ---
   
-  ;; Prepara as listas iniciais
-  (setq lista_completa nil i 0)
-  (while (< i (sslength ss_todos_os_blocos))
-    (setq lista_completa (cons (vlax-ename->vla-object (ssname ss_todos_os_blocos i)) lista_completa))
-    (setq i (1+ i))
+  ;; Encontra o "representante" (root) de um grupo, aplicando otimização (path compression)
+  (defun find-root (handle / p)
+    (setq p (cdr (assoc handle parent_map)))
+    (if (equal p handle)
+      handle
+      (progn
+        (setq root (find-root p))
+        (setq parent_map (subst (cons handle root) (assoc handle parent_map) parent_map)) ; Atualiza o pai para ser o root
+        root
+      )
+    )
   )
-  (setq lista_colunas nil)
-  (setq raio_de_toque 0.7)
 
-  ;; --- for bloco in lista completa: ---
-  (foreach bloco_A lista_completa
-    (princ ".") ; Mostra o progresso, pois este loop pode ser lento
-    (setq esfera_temp (vla-AddCircle mspace (vlax-3d-point (IAN:abs-get-insertion-point-list bloco_A)) raio_de_toque))
-    (setq tocou_em_alguem nil)
+  ;; Junta os grupos de dois blocos se eles não estiverem já no mesmo grupo
+  (defun union-sets (handle_A handle_B / root_A root_B group_A group_B)
+    (setq root_A (find-root handle_A))
+    (setq root_B (find-root handle_B))
 
-    ;; Verifica o bloco_A contra todos os outros
-    (foreach bloco_B lista_completa
-      (if (not (eq bloco_A bloco_B)) ; Não testa contra si mesmo
-        (progn
-          ;; --- verificar if encostou em um outro bloco: ---
-          (if (> (vlax-safearray-get-u-bound (vlax-variant-value (vla-IntersectWith esfera_temp bloco_B acExtendNone)) 1) -1)
-            (progn
-              (setq tocou_em_alguem T)
-              
-              ;; --- verificar se o blocoA ou o blocoB estao em alguma lista ---
-              (setq coluna_de_A (car (vl-member-if (function (lambda (col) (member bloco_A col))) lista_colunas)))
-              (setq coluna_de_B (car (vl-member-if (function (lambda (col) (member bloco_B col))) lista_colunas)))
-              
-              (cond
-                ;; --- se nenhum dos dois estiver: ---
-                ((and (not coluna_de_A) (not coluna_de_B))
-                 (setq nova_coluna (list bloco_A bloco_B))
-                 (setq lista_colunas (cons nova_coluna lista_colunas))
-                )
-                ;; --- se algum dos dois estiver: (A está, B não está) ---
-                ((and coluna_de_A (not coluna_de_B))
-                 (setq nova_coluna (cons bloco_B coluna_de_A))
-                 (setq lista_colunas (subst nova_coluna coluna_de_A lista_colunas))
-                )
-                ;; --- se algum dos dois estiver: (B está, A não está) ---
-                ((and (not coluna_de_A) coluna_de_B)
-                 (setq nova_coluna (cons bloco_A coluna_de_B))
-                 (setq lista_colunas (subst nova_coluna coluna_de_B lista_colunas))
-                )
-                ;; --- se os dois estiverem em alguma lista (mas em listas diferentes) ---
-                ((and coluna_de_A coluna_de_B (not (eq coluna_de_A coluna_de_B)))
-                  ;; Junta as duas colunas
-                  (setq coluna_mesclada (append coluna_de_A coluna_de_B))
-                  ;; Remove a coluna B e substitui a A pela mesclada
-                  (setq lista_colunas (vl-remove coluna_de_B lista_colunas))
-                  (setq lista_colunas (subst coluna_mesclada coluna_de_A lista_colunas))
-                )
-                ;; se os dois já estiverem na mesma lista, não faz nada (condição implícita)
-              )
-            )
+    (if (not (equal root_A root_B))
+      (progn
+        (setq group_A (cdr (assoc root_A group_map)))
+        (setq group_B (cdr (assoc root_B group_map)))
+        
+        ;; Otimização: junta o grupo menor no maior
+        (if (> (length group_A) (length group_B))
+          (progn
+            (setq parent_map (subst (cons root_B root_A) (assoc root_B parent_map) parent_map))
+            (setq group_map (subst (cons root_A (append group_A group_B)) (assoc root_A group_map) group_map))
+            (setq group_map (vl-remove (assoc root_B group_map) group_map))
+          )
+          (progn
+            (setq parent_map (subst (cons root_A root_B) (assoc root_A parent_map) parent_map))
+            (setq group_map (subst (cons root_B (append group_B group_A)) (assoc root_B group_map) group_map))
+            (setq group_map (vl-remove (assoc root_A group_map) group_map))
           )
         )
       )
     )
-    (vla-delete esfera_temp)
+  )
 
-    ;; --- se nao encostou em nenhum bloco: ---
-    (if (not tocou_em_alguem)
+  (princ "\nIniciando agrupamento (Otimizado)...")
+  (setq mspace (vla-get-ModelSpace (vla-get-ActiveDocument (vlax-get-acad-object))))
+  (setq i 0 lista_completa nil)
+  (while (< i (sslength ss_todos_os_blocos))
+    (setq lista_completa (cons (vlax-ename->vla-object (ssname ss_todos_os_blocos i)) lista_completa))
+    (setq i (1+ i))
+  )
+  
+  ;; --- FASE 1: INICIALIZAÇÃO ---
+  (princ "\nFase 1: Inicializando estruturas...")
+  (setq raio_de_toque 0.8)
+  (setq grid_size (* 0.7 raio_de_toque)) ; Tamanho da célula do grid
+  (setq grid_map nil parent_map nil group_map nil)
+
+  ;; Para cada bloco, crie seu próprio grupo inicial e coloque-o no grid
+  (foreach blk lista_completa
+    (setq h (vla-get-Handle blk))
+    (setq pt (IAN:abs-get-insertion-point-list blk))
+    
+    ;; Inicializa o Union-Find: cada bloco é seu próprio pai e seu próprio grupo
+    (setq parent_map (cons (cons h h) parent_map))
+    (setq group_map (cons (cons h (list blk)) group_map))
+    
+    ;; Coloca o bloco no Grid Espacial
+    (setq key (strcat (itoa (fix (/ (car pt) grid_size))) "_" (itoa (fix (/ (cadr pt) grid_size)))))
+    (setq cell (assoc key grid_map))
+    (if cell
+      (setq grid_map (subst (cons key (cons blk (cdr cell))) cell grid_map))
+      (setq grid_map (cons (cons key (list blk)) grid_map))
+    )
+  )
+
+  ;; --- FASE 2: PROCESSAMENTO E AGRUPAMENTO ---
+  (princ "\nFase 2: Verificando vizinhos e agrupando...")
+  (foreach bloco_A lista_completa
+    (princ ".")
+    (setq pt_A (IAN:abs-get-insertion-point-list bloco_A))
+    (setq gx (fix (/ (car pt_A) grid_size)))
+    (setq gy (fix (/ (cadr pt_A) grid_size)))
+    (setq vizinhos_potenciais nil)
+
+    ;; Coleta vizinhos apenas da sua célula do grid e das 8 ao redor (3x3)
+    (setq y -1)
+    (while (<= y 1)
+      (setq x -1)
+      (while (<= x 1)
+        (setq key_A (strcat (itoa (+ gx x)) "_" (itoa (+ gy y))))
+        (if (assoc key_A grid_map)
+          (setq vizinhos_potenciais (append (cdr (assoc key_A grid_map)) vizinhos_potenciais))
+        )
+        (setq x (1+ x))
+      )
+      (setq y (1+ y))
+    )
+    
+    ;; Agora, só compara contra os vizinhos POTENCIAIS, não contra todos
+    (setq esfera_temp (vla-AddCircle mspace (vlax-3d-point pt_A) raio_de_toque))
+    (foreach bloco_B vizinhos_potenciais
+      (if (not (eq bloco_A bloco_B)) ; Não testa contra si mesmo
+        (if (> (vlax-safearray-get-u-bound (vlax-variant-value (vla-IntersectWith esfera_temp bloco_B acExtendNone)) 1) -1)
+          ;; Se tocou, une os grupos deles
+          (union-sets (vla-get-Handle bloco_A) (vla-get-Handle bloco_B))
+        )
+      )
+    )
+    (vla-delete esfera_temp)
+  )
+
+  ;; --- FASE 3: COLETA FINAL DOS GRUPOS ---
+  (princ "\nFase 3: Coletando grupos finais...")
+  (setq grupos_finais nil)
+  (foreach par group_map
+    (setq grupos_finais (cons (cdr par) grupos_finais))
+  )
+  
+  (princ "\nAgrupamento concluído.")
+  
+  ;; --- DEBUG VISUAL ---
+  (IAN:debug-desenhar-linhas-de-grupo grupos_finais)
+  
+  grupos_finais
+)
+
+;;; --- FUNÇÃO DE DEBUG VISUAL: Desenha polilinhas conectando os grupos ---
+(defun IAN:debug-desenhar-linhas-de-grupo (lista_de_grupos / 
+                                           layer_name layer_color grupo
+                                           lista_de_pontos bloco pt_bloco 
+                                           pontos_ordenados vertices_para_entmake
+                                          )
+  (princ "\nDesenhando linhas de debug...")
+  (setq layer_name "DEBUG_GRUPOS"
+        layer_color 1 ; 1 = Vermelho
+  )
+
+  ;; Garante que a layer de debug exista e esteja visível
+  (if (not (tblsearch "LAYER" layer_name))
+    (command "_.LAYER" "_MAKE" layer_name "_COLOR" layer_color "" "")
+  )
+  
+  (foreach grupo lista_de_grupos
+    ;; Só processa se o grupo tiver pelo menos 2 blocos para formar uma linha
+    (if (> (length grupo) 1)
       (progn
-        ;; --- verificar se o blocoA esta em alguma lista ---
-        (if (not (car (vl-member-if (function (lambda (col) (member bloco_A col))) lista_colunas)))
-          ;; --- se nao estiver: criar uma lista com o blocoA ---
-          (setq lista_colunas (cons (list bloco_A) lista_colunas))
+        ;; 1. Coleta os pontos de inserção de todos os blocos do grupo
+        (setq lista_de_pontos nil)
+        (foreach bloco grupo
+          (setq pt_bloco (IAN:abs-get-insertion-point-list bloco))
+          (if pt_bloco (setq lista_de_pontos (cons pt_bloco lista_de_pontos)))
+        )
+
+        ;; 2. Ordena os pontos pela altura (Z) para a linha subir corretamente
+        (setq pontos_ordenados 
+              (vl-sort lista_de_pontos 
+                       (function (lambda (p1 p2) (< (caddr p1) (caddr p2))))
+              )
+        )
+        
+        ;; 3. Cria a entidade LWPOLYLINE com os pontos ordenados
+        (setq vertices_para_entmake nil)
+        (foreach pt pontos_ordenados
+          (setq vertices_para_entmake (append vertices_para_entmake (list (cons 10 pt))))
+        )
+        
+        (entmake 
+          (append 
+            (list
+              '(0 . "LWPOLYLINE")
+              '(100 . "AcDbEntity")
+              '(100 . "AcDbPolyline")
+              (cons 8 layer_name) ; Coloca na layer de debug
+              (cons 62 layer_color) ; Define a cor como vermelha
+              (cons 90 (length pontos_ordenados)) ; Número de vértices
+              '(70 . 0) ; Polilinha aberta
+            )
+            vertices_para_entmake
+          )
         )
       )
     )
   )
-  (princ "\nAgrupamento concluído.")
-  lista_colunas
+  (princ " Concluído.")
 )
-
 
 ;;; --- NOVO COMANDO DE SUBSTITUIÇÃO (USA LÓGICA DIRETA) ---
 (defun c:SUBSTITUIR_BASE_LOGICA_DIRETA (/ *error* old_cmdecho old_osmode mspace
@@ -2056,7 +2171,7 @@
   (if (not ss_alvo) (progn (princ "\nNenhum bloco selecionado. Comando cancelado.") (exit)))
   
   ;; 2. Agrupa os blocos em colunas usando a SUA lógica
-  (setq colunas_agrupadas (IAN:agrupar-blocos-logica-direta ss_alvo))
+  (setq colunas_agrupadas (IAN:agrupar-blocos-otimizado ss_alvo))
   
   ;; 3. Processa cada coluna encontrada
   (setq total_substituidos 0)
