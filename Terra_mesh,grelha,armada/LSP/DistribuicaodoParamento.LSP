@@ -2076,70 +2076,7 @@
   
   (princ "\nAgrupamento concluído.")
   
-  ;; --- DEBUG VISUAL ---
-  (IAN:debug-desenhar-linhas-de-grupo grupos_finais)
-  
   grupos_finais
-)
-
-;;; --- FUNÇÃO DE DEBUG VISUAL: Desenha polilinhas conectando os grupos ---
-(defun IAN:debug-desenhar-linhas-de-grupo (lista_de_grupos / 
-                                           layer_name layer_color grupo
-                                           lista_de_pontos bloco pt_bloco 
-                                           pontos_ordenados vertices_para_entmake
-                                          )
-  (princ "\nDesenhando linhas de debug...")
-  (setq layer_name "DEBUG_GRUPOS"
-        layer_color 1 ; 1 = Vermelho
-  )
-
-  ;; Garante que a layer de debug exista e esteja visível
-  (if (not (tblsearch "LAYER" layer_name))
-    (command "_.LAYER" "_MAKE" layer_name "_COLOR" layer_color "" "")
-  )
-  
-  (foreach grupo lista_de_grupos
-    ;; Só processa se o grupo tiver pelo menos 2 blocos para formar uma linha
-    (if (> (length grupo) 1)
-      (progn
-        ;; 1. Coleta os pontos de inserção de todos os blocos do grupo
-        (setq lista_de_pontos nil)
-        (foreach bloco grupo
-          (setq pt_bloco (IAN:abs-get-insertion-point-list bloco))
-          (if pt_bloco (setq lista_de_pontos (cons pt_bloco lista_de_pontos)))
-        )
-
-        ;; 2. Ordena os pontos pela altura (Z) para a linha subir corretamente
-        (setq pontos_ordenados 
-              (vl-sort lista_de_pontos 
-                       (function (lambda (p1 p2) (< (caddr p1) (caddr p2))))
-              )
-        )
-        
-        ;; 3. Cria a entidade LWPOLYLINE com os pontos ordenados
-        (setq vertices_para_entmake nil)
-        (foreach pt pontos_ordenados
-          (setq vertices_para_entmake (append vertices_para_entmake (list (cons 10 pt))))
-        )
-        
-        (entmake 
-          (append 
-            (list
-              '(0 . "LWPOLYLINE")
-              '(100 . "AcDbEntity")
-              '(100 . "AcDbPolyline")
-              (cons 8 layer_name) ; Coloca na layer de debug
-              (cons 62 layer_color) ; Define a cor como vermelha
-              (cons 90 (length pontos_ordenados)) ; Número de vértices
-              '(70 . 0) ; Polilinha aberta
-            )
-            vertices_para_entmake
-          )
-        )
-      )
-    )
-  )
-  (princ " Concluído.")
 )
 
 ;;; --- NOVO COMANDO DE SUBSTITUIÇÃO (USA LÓGICA DIRETA) ---
@@ -2200,8 +2137,17 @@
       
       (if (not (vl-catch-all-error-p (vla-Delete bloco_a_trocar)))
         (progn
+          ;; Insere o primeiro meio-bloco (na base)
           (vla-InsertBlock mspace (vlax-3d-point pt) nome_meio_bloco 1.0 1.0 1.0 rot)
           (vla-put-Layer (vlax-ename->vla-object (entlast)) layer)
+
+          ;; Insere o segundo meio-bloco (empilhado, com Z + 0.5)
+          (vla-InsertBlock mspace 
+                           (vlax-3d-point (list (car pt) (cadr pt) (+ (caddr pt) 0.5))) 
+                           nome_meio_bloco 1.0 1.0 1.0 rot)
+          (vla-put-Layer (vlax-ename->vla-object (entlast)) layer)
+          
+          ;; Incrementa o contador de blocos INTEIROS substituídos
           (setq total_substituidos (1+ total_substituidos))
         )
       )
