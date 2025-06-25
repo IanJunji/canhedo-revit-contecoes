@@ -57,6 +57,7 @@
                     <a href="#" data-tab="cbe" class="sub-nav-link py-3 px-1 font-medium">🪜 CBE</a>
                     <a href="#" data-tab="abs" class="sub-nav-link py-3 px-1 font-medium">↕️ ABS</a>
                     <a href="#" data-tab="delblocinv" class="sub-nav-link py-3 px-1 font-medium">🗑️ DELBLOCINV</a>
+                    <a href="#" data-tab="scm" class="sub-nav-link py-3 px-1 font-medium">🌗 SCM</a>
                     <a href="#" data-tab="exdblk" class="sub-nav-link py-3 px-1 font-medium">📤 EXDBLK</a>
                 </nav>
 
@@ -122,19 +123,32 @@
                 </div>
             </section>
             <section data-content="cbe" class="hidden space-y-6">
-                <h2 class="text-2xl font-bold">🪜 CBE (Criar Bloco em Escadinha)</h2>
+                <h2 class="text-2xl font-bold">🪜 CBE (Criar Camadas em Escadinha - Automático)</h2>
                 <div class="instruction-card text-lg space-y-4">
-                     <div>
+                    <div>
                         <h3 class="text-xl font-semibold mb-2 text-sky-300">Função Principal</h3>
-                        <p>Automatiza a criação de múltiplas camadas de uma contenção, copiando uma seleção de blocos com deslocamentos verticais (altura) e horizontais (offset) definidos.</p>
+                        <p>Automatiza a criação de contenções complexas. A partir de uma seleção única contendo os blocos da base, as linhas de alinhamento e as linhas de perfil (topo), o comando calcula e constrói todas as camadas necessárias para que cada coluna de blocos alcance individualmente sua altura de projeto definida pelas linhas de perfil.</p>
+                    </div>
+                    <div>
+                        <h3 class="text-xl font-semibold mb-2 text-sky-300">Como Funciona (A Inteligência do Comando)</h3>
+                        <ol class="list-decimal list-inside space-y-3 pl-4">
+                            <li><strong>Classificação Automática:</strong> O comando analisa sua seleção e identifica o que são blocos, o que são linhas de base (por proximidade aos blocos) e o que são linhas de perfil (as linhas restantes).</li>
+                            <li><strong>Cálculo Individual de Altura:</strong> Para cada bloco na camada base, o comando projeta uma linha perpendicular até encontrar a linha de perfil mais próxima. A cota Z (altura) desse ponto de encontro se torna a altura final para aquela coluna específica de blocos.</li>
+                            <li><strong>Construção Automática:</strong> Com a altura final de cada coluna definida, o comando cria as camadas com os offsets e alturas fornecidos, resultando em um coroamento que segue perfeitamente a geometria do perfil de topo.</li>
+                        </ol>
                     </div>
                     <div>
                         <h3 class="text-xl font-semibold mb-2 text-sky-300">Inputs do Usuário (em sequência)</h3>
                         <ul class="list-disc list-inside space-y-2 pl-4">
-                            <li><strong class="text-amber-400">Direção:</strong> Escolher entre <code>Subir</code> ou <code>Descer</code>.</li>
-                            <li><strong class="text-amber-400">Altura do Bloco:</strong> Digitar o deslocamento vertical entre as camadas.</li>
-                            <li><strong class="text-amber-400">Offset:</strong> Digitar o deslocamento horizontal entre as camadas.</li>
-                            <li><strong class="text-amber-400">Coordenada Z Final:</strong> Digitar a cota Z que a última camada deve alcançar.</li>
+                            <li><strong class="text-amber-400">Seleção Única de Objetos:</strong> Selecione de uma só vez <strong>todos</strong> os elementos:
+                                <ul class="list-['-_'] list-inside pl-6 mt-2 space-y-1 text-gray-400">
+                                    <li>Os blocos da camada de base.</li>
+                                    <li>As linhas de alinhamento (base da contenção).</li>
+                                    <li>As linhas de perfil (topo da contenção).</li>
+                                </ul>
+                            </li>
+                            <li><strong class="text-amber-400">Offset Horizontal:</strong> Digitar o valor do recuo ou avanço para cada nova camada (pode ser 0).</li>
+                            <li><strong class="text-amber-400">Altura Vertical:</strong> Digitar a altura de cada bloco/camada.</li>
                         </ul>
                     </div>
                 </div>
@@ -165,6 +179,23 @@
                         <h3 class="text-xl font-semibold mb-2 text-sky-300">Inputs do Usuário</h3>
                         <ul class="list-disc list-inside space-y-2 pl-4">
                             <li><strong class="text-amber-400">Seleção Inicial:</strong> Você clica no primeiro bloco da sequência que deseja filtrar.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+            <section data-content="scm" class="hidden space-y-6">
+                <h2 class="text-2xl font-bold">🌗 SCM (Substituir Caixa Meio)</h2>
+                <div class="instruction-card text-lg space-y-4">
+                    <div>
+                        <h3 class="text-xl font-semibold mb-2 text-sky-300">Função Principal</h3>
+                        <p>Analisa os blocos selecionados, os agrupa em colunas verticais e substitui uma porcentagem definida dos blocos na base de cada coluna. Cada bloco inteiro removido é trocado por dois "meio-blocos" empilhados, um em cima do outro.</p>
+                    </div>
+                     <div>
+                        <h3 class="text-xl font-semibold mb-2 text-sky-300">Inputs do Usuário (em sequência)</h3>
+                        <ul class="list-disc list-inside space-y-2 pl-4">
+                            <li><strong class="text-amber-400">Seleção do Meio-Bloco:</strong> Você clica em um bloco modelo (o "meio-bloco") que será usado para a substituição.</li>
+                            <li><strong class="text-amber-400">Porcentagem de Substituição:</strong> Você digita um valor percentual (ex: <code>20</code> para 20%) que define a altura da base a ser substituída.</li>
+                            <li><strong class="text-amber-400">Seleção de Blocos:</strong> Você seleciona todos os blocos da contenção que serão analisados.</li>
                         </ul>
                     </div>
                 </div>
